@@ -77,20 +77,22 @@ func (m *Market) IsExpiringSoon(within time.Duration) bool {
 	return time.Until(endTime) <= within && time.Until(endTime) > 0
 }
 
-// GetYesToken returns the "Yes" outcome token if present.
+// GetYesToken returns the "Yes" or "Up" outcome token if present.
 func (m *Market) GetYesToken() *Token {
 	for i := range m.Tokens {
-		if m.Tokens[i].Outcome == "Yes" {
+		o := strings.ToLower(m.Tokens[i].Outcome)
+		if o == "yes" || o == "up" {
 			return &m.Tokens[i]
 		}
 	}
 	return nil
 }
 
-// GetNoToken returns the "No" outcome token if present.
+// GetNoToken returns the "No" or "Down" outcome token if present.
 func (m *Market) GetNoToken() *Token {
 	for i := range m.Tokens {
-		if m.Tokens[i].Outcome == "No" {
+		o := strings.ToLower(m.Tokens[i].Outcome)
+		if o == "no" || o == "down" {
 			return &m.Tokens[i]
 		}
 	}
