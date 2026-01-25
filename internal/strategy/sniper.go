@@ -11,6 +11,7 @@ import (
 	"github.com/dantezy/polymarket-sniper/internal/clob"
 	"github.com/dantezy/polymarket-sniper/internal/config"
 	"github.com/dantezy/polymarket-sniper/internal/gamma"
+	"github.com/dantezy/polymarket-sniper/internal/pricefeed"
 	"github.com/dantezy/polymarket-sniper/internal/telegram"
 	"github.com/dantezy/polymarket-sniper/internal/wallet"
 )
@@ -72,6 +73,10 @@ type TrackedMarket struct {
 	GammaYesPrice float64
 	GammaNoPrice  float64
 	sniped        bool
+
+	// Binance price tracking (for faster winner detection)
+	BinanceSymbol    string  // e.g., "BTCUSDT"
+	BinanceStartPrice float64 // Price at market start time
 
 	// Price history for momentum detection (last 10 snapshots)
 	priceHistory []PriceSnapshot
@@ -219,6 +224,7 @@ type Sniper struct {
 	ws       *clob.WSClient
 	builder  *clob.OrderBuilder
 	telegram *telegram.Bot
+	binance  *pricefeed.BinanceClient // Real-time price feed
 
 	activeMarkets map[string]*TrackedMarket
 	dailyStats    *DailyStats
@@ -247,6 +253,7 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 	clobClient := clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase)
 	wsClient := clob.NewWSClient()
 	builder := clob.NewOrderBuilder(w)
+	binanceClient := pricefeed.NewBinanceClient()
 
 	minLiq := cfg.MinLiquidity
 	if minLiq <= 0 {
@@ -270,6 +277,7 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 		ws:              wsClient,
 		builder:         builder,
 		telegram:        tg,
+		binance:         binanceClient,
 		activeMarkets:   make(map[string]*TrackedMarket),
 		dailyStats:      &DailyStats{Date: time.Now().Truncate(24 * time.Hour)},
 		maxLossPerTrade: defaultMaxLossPerTrade,
@@ -449,18 +457,30 @@ func (s *Sniper) trackMarket(market gamma.Market) (*TrackedMarket, error) {
 		gammaNo = gammaPrices[1]
 	}
 
+	// Get Binance symbol and start price for real-time winner detection
+	binanceSymbol := pricefeed.SymbolFromMarketQuestion(market.Question)
+	var binanceStartPrice float64
+	if binanceSymbol != "" {
+		if price, err := s.binance.GetPrice(binanceSymbol); err == nil {
+			binanceStartPrice = price
+			log.Printf("[sniper] %s: tracking Binance %s @ $%.2f", market.Slug, binanceSymbol, price)
+		}
+	}
+
 	tracked := &TrackedMarket{
-		Market:        market,
-		YesTokenID:    yesToken.TokenID,
-		NoTokenID:     noToken.TokenID,
-		EndTime:       endTime,
-		BestYesBid:    yesToken.Price,
-		BestYesAsk:    yesToken.Price,
-		BestNoBid:     noToken.Price,
-		BestNoAsk:     noToken.Price,
-		GammaYesPrice: gammaYes,
-		GammaNoPrice:  gammaNo,
-		priceHistory:  make([]PriceSnapshot, 0, 10),
+		Market:            market,
+		YesTokenID:        yesToken.TokenID,
+		NoTokenID:         noToken.TokenID,
+		EndTime:           endTime,
+		BestYesBid:        yesToken.Price,
+		BestYesAsk:        yesToken.Price,
+		BestNoBid:         noToken.Price,
+		BestNoAsk:         noToken.Price,
+		GammaYesPrice:     gammaYes,
+		GammaNoPrice:      gammaNo,
+		BinanceSymbol:     binanceSymbol,
+		BinanceStartPrice: binanceStartPrice,
+		priceHistory:      make([]PriceSnapshot, 0, 10),
 	}
 
 	// Subscribe to WebSocket price updates for both tokens
@@ -601,10 +621,12 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 	yesSize, noSize := tracked.GetSizes()
 	momentum := tracked.GetMomentum()
 
-	// Get Gamma's indicative prices (more reliable for winner determination)
+	// Get Gamma's indicative prices
 	tracked.mu.RLock()
 	gammaYes := tracked.GammaYesPrice
 	gammaNo := tracked.GammaNoPrice
+	binanceSymbol := tracked.BinanceSymbol
+	binanceStartPrice := tracked.BinanceStartPrice
 	tracked.mu.RUnlock()
 
 	analysis := TradeAnalysis{
@@ -619,12 +641,34 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 		return analysis
 	}
 
-	// Determine winner using Gamma prices (more accurate than CLOB order book)
-	// Gamma prices reflect actual market consensus; CLOB may have wide spreads
-	yesWins := gammaYes > gammaNo
-	if gammaYes == 0 && gammaNo == 0 {
-		// Fallback to CLOB bid prices if Gamma prices unavailable
-		yesWins = yesBid > noBid
+	// PRIMARY: Use Binance for winner detection (faster than Gamma)
+	var yesWins bool
+	var binanceDirection string
+	var binanceChangePercent float64
+
+	if binanceSymbol != "" && binanceStartPrice > 0 {
+		currentPrice, err := s.binance.GetPrice(binanceSymbol)
+		if err == nil {
+			binanceChangePercent = (currentPrice - binanceStartPrice) / binanceStartPrice * 100
+			if currentPrice >= binanceStartPrice {
+				yesWins = true
+				binanceDirection = "UP"
+			} else {
+				yesWins = false
+				binanceDirection = "DOWN"
+			}
+			log.Printf("[sniper] Binance %s: $%.2f -> $%.2f (%.2f%%) => %s",
+				binanceSymbol, binanceStartPrice, currentPrice, binanceChangePercent, binanceDirection)
+		} else {
+			// Fallback to Gamma
+			yesWins = gammaYes > gammaNo
+		}
+	} else {
+		// Fallback: Determine winner using Gamma prices
+		yesWins = gammaYes > gammaNo
+		if gammaYes == 0 && gammaNo == 0 {
+			yesWins = yesBid > noBid
+		}
 	}
 
 	// Signal 2: Strong momentum (price jumped significantly)
@@ -644,13 +688,13 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 		winnerAsk = yesAsk
 		winnerSize = yesSize
 	} else {
-		// DOWN is winning, but DOWN tokens typically have no liquidity (ask=0.99)
-		// Market makers only provide liquidity on UP side
-		// Skip if DOWN ask is >= 0.95 (indicates no real liquidity)
-		if noAsk >= 0.95 {
+		// DOWN is winning - check if there's any liquidity
+		// Market makers typically favor UP side, but we can still trade DOWN at higher prices
+		// Skip only if DOWN ask is >= 0.99 (truly no liquidity)
+		if noAsk >= 0.99 {
 			analysis.Side = "DOWN"
 			analysis.SkipReason = SkipReasonDownNoLiq
-			analysis.SkipDescription = fmt.Sprintf("DOWN winning but no liquidity (ask=%.4f), only UP side tradeable", noAsk)
+			analysis.SkipDescription = fmt.Sprintf("DOWN winning but no liquidity (ask=%.4f)", noAsk)
 			return analysis
 		}
 		analysis.Side = "DOWN"
@@ -971,7 +1015,7 @@ func (s *Sniper) logStatus() {
 			}
 			log.Printf("[status] %s - ends in %v", tracked.Market.Question, timeRemaining.Truncate(time.Second))
 			log.Printf("[status]   gamma: UP=%.1f%% DOWN=%.1f%% => likely %s", gammaYes*100, gammaNo*100, winner)
-			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade, UP side only)", prob*100, s.minConfidence*100)
+			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade)", prob*100, s.minConfidence*100)
 		} else {
 			log.Printf("[status] %s - ENDED (cleanup pending)", tracked.Market.Question)
 		}

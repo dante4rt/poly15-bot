@@ -225,6 +225,109 @@ func (c *Client) SearchMarketsWithParams(params SearchParams) ([]Market, error) 
 	return markets, nil
 }
 
+// GetSportsMarkets retrieves active sports betting markets (NFL, NBA, etc.).
+func (c *Client) GetSportsMarkets() ([]Market, error) {
+	marketMap := make(map[string]Market)
+	now := time.Now()
+
+	// Search patterns for sports markets
+	queries := []string{
+		"Super Bowl",
+		"NFC Championship",
+		"AFC Championship",
+		"NBA Championship",
+		"NFL",
+		"win the",
+	}
+
+	for _, query := range queries {
+		markets, err := c.SearchMarkets(query)
+		if err != nil {
+			continue
+		}
+		for _, market := range markets {
+			if c.isValidSportsMarket(market) {
+				// Check end time is in the future
+				endTime, _ := market.EndTime()
+				if endTime.After(now) {
+					marketMap[market.Slug] = market
+				}
+			}
+		}
+	}
+
+	result := make([]Market, 0, len(marketMap))
+	for _, market := range marketMap {
+		result = append(result, market)
+	}
+
+	return result, nil
+}
+
+// isValidSportsMarket checks if a market is a valid sports betting market.
+func (c *Client) isValidSportsMarket(market Market) bool {
+	if !market.Active || market.Closed {
+		return false
+	}
+
+	question := strings.ToLower(market.Question)
+
+	// Must be a "will X win" type question
+	if !strings.Contains(question, "win") {
+		return false
+	}
+
+	// Must be sports-related
+	sportsKeywords := []string{
+		"super bowl",
+		"nfc championship",
+		"afc championship",
+		"nba championship",
+		"nfl",
+		"nba",
+		"patriots",
+		"broncos",
+		"rams",
+		"seahawks",
+		"chiefs",
+		"bills",
+		"eagles",
+		"49ers",
+		"lions",
+		"cowboys",
+		"packers",
+		"vikings",
+	}
+
+	for _, keyword := range sportsKeywords {
+		if strings.Contains(question, keyword) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// GetNFLPlayoffMarkets retrieves NFL playoff markets (Conference Championships, Super Bowl).
+func (c *Client) GetNFLPlayoffMarkets() ([]Market, error) {
+	markets, err := c.GetSportsMarkets()
+	if err != nil {
+		return nil, err
+	}
+
+	playoffMarkets := make([]Market, 0)
+	for _, market := range markets {
+		question := strings.ToLower(market.Question)
+		if strings.Contains(question, "super bowl") ||
+			strings.Contains(question, "nfc championship") ||
+			strings.Contains(question, "afc championship") {
+			playoffMarkets = append(playoffMarkets, market)
+		}
+	}
+
+	return playoffMarkets, nil
+}
+
 // GetMarketByConditionID fetches a specific market by its condition ID.
 func (c *Client) GetMarketByConditionID(conditionID string) (*Market, error) {
 	endpoint := fmt.Sprintf("%s/markets/%s", c.baseURL, url.PathEscape(conditionID))

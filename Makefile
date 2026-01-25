@@ -1,4 +1,4 @@
-.PHONY: build run run-dry scan approve test clean docker-build docker-run docker-logs docker-stop
+.PHONY: build run run-dry scan approve test clean docker-build docker-run docker-logs docker-stop sports sports-dry
 
 # Local development
 build:
@@ -6,12 +6,19 @@ build:
 	go build -o bin/sniper ./cmd/sniper
 	go build -o bin/scanner ./cmd/scanner
 	go build -o bin/approve ./cmd/approve
+	go build -o bin/sports ./cmd/sports
 
 run:
 	./bin/sniper
 
 run-dry:
 	DRY_RUN=true ./bin/sniper
+
+sports:
+	./bin/sports
+
+sports-dry:
+	DRY_RUN=true ./bin/sports
 
 scan:
 	./bin/scanner
