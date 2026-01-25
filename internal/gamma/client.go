@@ -78,12 +78,13 @@ func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
 	// 15M markets use slug pattern: {asset}-updown-15m-{timestamp}
 	assets := []string{"btc", "eth", "sol", "xrp"}
 	marketMap := make(map[string]Market)
+	now := time.Now()
 
 	// Try fetching by slug pattern for current and next few windows
-	now := time.Now().Unix()
+	nowUnix := now.Unix()
 	// Round to next 15-minute boundary
 	windowSize := int64(15 * 60)
-	currentWindow := ((now / windowSize) + 1) * windowSize
+	currentWindow := ((nowUnix / windowSize) + 1) * windowSize
 
 	for _, asset := range assets {
 		// Check current and next 2 windows
@@ -93,7 +94,11 @@ func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
 
 			market, err := c.GetMarketBySlug(slug)
 			if err == nil && market != nil && market.Active && !market.Closed {
-				marketMap[market.ConditionID] = *market
+				// Verify the market hasn't ended
+				endTime, _ := market.EndTime()
+				if endTime.After(now) {
+					marketMap[market.GetConditionID()] = *market
+				}
 			}
 		}
 	}
@@ -107,7 +112,11 @@ func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
 		}
 		for _, market := range markets {
 			if c.isValidUpDownMarket(market) {
-				marketMap[market.ConditionID] = market
+				// Double-check end time
+				endTime, _ := market.EndTime()
+				if endTime.After(now) {
+					marketMap[market.GetConditionID()] = market
+				}
 			}
 		}
 	}

@@ -398,6 +398,11 @@ func (s *Sniper) trackMarket(market gamma.Market) (*TrackedMarket, error) {
 		return nil, fmt.Errorf("failed to parse end time: %w", err)
 	}
 
+	// Skip markets that have already ended
+	if time.Until(endTime) <= 0 {
+		return nil, fmt.Errorf("market already ended at %s", endTime.Format(time.RFC3339))
+	}
+
 	yesToken := market.GetYesToken()
 	noToken := market.GetNoToken()
 
