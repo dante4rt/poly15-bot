@@ -75,22 +75,24 @@ func (c *Client) SearchMarkets(query string) ([]Market, error) {
 // GetActiveUpDownMarkets retrieves active 15-minute BTC/ETH up-or-down markets
 // expiring within the next 20 minutes.
 func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
-	// 15M markets use slug pattern: {asset}-updown-15m-{timestamp}
+	// 15M markets use slug pattern: {asset}-updown-15m-{startTimestamp}
+	// The slug contains the START time, endDate = start + 15 minutes
 	assets := []string{"btc", "eth", "sol", "xrp"}
 	marketMap := make(map[string]Market)
 	now := time.Now()
 
-	// Try fetching by slug pattern for current and next few windows
+	// Calculate window timestamps
 	nowUnix := now.Unix()
-	// Round to next 15-minute boundary
 	windowSize := int64(15 * 60)
-	currentWindow := ((nowUnix / windowSize) + 1) * windowSize
+	// Get CURRENT window start (floor to 15-min boundary)
+	currentWindowStart := (nowUnix / windowSize) * windowSize
 
 	for _, asset := range assets {
-		// Check current and next 2 windows
+		// Check current window and next 2 windows
+		// Current window is the one that's about to end!
 		for i := int64(0); i < 3; i++ {
-			targetTime := currentWindow + (i * windowSize)
-			slug := fmt.Sprintf("%s-updown-15m-%d", asset, targetTime)
+			targetStartTime := currentWindowStart + (i * windowSize)
+			slug := fmt.Sprintf("%s-updown-15m-%d", asset, targetStartTime)
 
 			market, err := c.GetMarketBySlug(slug)
 			if err == nil && market != nil && market.Active && !market.Closed {
