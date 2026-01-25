@@ -29,6 +29,7 @@ type Config struct {
 	MaxPositionSize float64
 	SnipePrice      float64
 	TriggerSeconds  int
+	MinLiquidity    float64
 }
 
 func Load() (*Config, error) {
@@ -46,6 +47,7 @@ func Load() (*Config, error) {
 		MaxPositionSize: getEnvFloat("MAX_POSITION_SIZE", 10),
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
+		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
 	}
 
 	var missingFields []string
@@ -98,6 +100,7 @@ func LoadMinimal() (*Config, error) {
 		MaxPositionSize: getEnvFloat("MAX_POSITION_SIZE", 10),
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
+		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
 		PrivateKey:      os.Getenv("PRIVATE_KEY"),
 	}, nil
 }
@@ -118,6 +121,7 @@ func LoadWithPrivateKey() (*Config, error) {
 		MaxPositionSize: getEnvFloat("MAX_POSITION_SIZE", 10),
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
+		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
 	}
 
 	cfg.PrivateKey = os.Getenv("PRIVATE_KEY")

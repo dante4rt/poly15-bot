@@ -24,7 +24,7 @@ const (
 	minWinnerConfidence = 0.65  // Minimum bid price to consider a clear winner
 	maxUncertaintyGap   = 0.10  // If YES and NO bids are within this range, too risky
 	maxSpreadPercent    = 0.05  // Maximum spread as percentage of price (5%)
-	minLiquidity        = 50.0  // Minimum size in USD at best ask
+	defaultMinLiquidity = 5.0   // Default minimum size in USD at best ask
 	momentumThreshold   = 0.15  // Price jump threshold for momentum signal
 
 	// Risk management
@@ -226,6 +226,7 @@ type Sniper struct {
 	// Configurable risk parameters
 	maxLossPerTrade float64
 	dailyLossLimit  float64
+	minLiquidity    float64
 }
 
 // NewSniper creates a new Sniper instance.
@@ -242,6 +243,11 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 	wsClient := clob.NewWSClient()
 	builder := clob.NewOrderBuilder(w)
 
+	minLiq := cfg.MinLiquidity
+	if minLiq <= 0 {
+		minLiq = defaultMinLiquidity
+	}
+
 	sniper := &Sniper{
 		config:          cfg,
 		gamma:           gammaClient,
@@ -253,6 +259,7 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 		dailyStats:      &DailyStats{Date: time.Now().Truncate(24 * time.Hour)},
 		maxLossPerTrade: defaultMaxLossPerTrade,
 		dailyLossLimit:  defaultDailyLossLimit,
+		minLiquidity:    minLiq,
 	}
 
 	// Register global WebSocket handler for price updates
@@ -634,9 +641,9 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 
 	// Check 4: Sufficient liquidity at ask
 	analysis.AvailableSize = winnerSize
-	if winnerSize < minLiquidity {
+	if winnerSize < s.minLiquidity {
 		analysis.SkipReason = SkipReasonNoLiquidity
-		analysis.SkipDescription = fmt.Sprintf("size $%.2f < min $%.2f", winnerSize, minLiquidity)
+		analysis.SkipDescription = fmt.Sprintf("size $%.2f < min $%.2f", winnerSize, s.minLiquidity)
 		return analysis
 	}
 
