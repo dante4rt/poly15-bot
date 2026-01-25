@@ -80,3 +80,17 @@ type APIError struct {
 func (e *APIError) Error() string {
 	return e.Message
 }
+
+// AssetType represents the type of asset for balance queries.
+type AssetType string
+
+const (
+	AssetTypeCollateral  AssetType = "COLLATERAL"  // USDC balance
+	AssetTypeConditional AssetType = "CONDITIONAL" // Position tokens
+)
+
+// BalanceAllowanceResponse represents the balance and allowance for an asset.
+type BalanceAllowanceResponse struct {
+	Balance   string `json:"balance"`
+	Allowance string `json:"allowance"`
+}

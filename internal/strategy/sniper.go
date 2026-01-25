@@ -14,6 +14,7 @@ import (
 	"github.com/dantezy/polymarket-sniper/internal/pricefeed"
 	"github.com/dantezy/polymarket-sniper/internal/telegram"
 	"github.com/dantezy/polymarket-sniper/internal/wallet"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -252,8 +253,15 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 	gammaClient := gamma.NewClient()
 	clobClient := clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, w.AddressHex())
 	wsClient := clob.NewWSClient()
-	builder := clob.NewOrderBuilder(w, cfg.CLOBApiKey)
 	binanceClient := pricefeed.NewBinanceClient()
+
+	// Create order builder - use proxy wallet if configured
+	var builder *clob.OrderBuilder
+	if cfg.UseProxyWallet() {
+		builder = clob.NewOrderBuilderWithProxy(w, cfg.CLOBApiKey, common.HexToAddress(cfg.ProxyWalletAddress))
+	} else {
+		builder = clob.NewOrderBuilder(w, cfg.CLOBApiKey)
+	}
 
 	minLiq := cfg.MinLiquidity
 	if minLiq <= 0 {

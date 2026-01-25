@@ -14,6 +14,7 @@ import (
 	"github.com/dantezy/polymarket-sniper/internal/gamma"
 	"github.com/dantezy/polymarket-sniper/internal/telegram"
 	"github.com/dantezy/polymarket-sniper/internal/wallet"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -170,7 +171,13 @@ func NewBlackSwanHunter(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) 
 		clobClient = clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, walletAddr)
 	}
 
-	builder := clob.NewOrderBuilder(w, cfg.CLOBApiKey)
+	// Create order builder - use proxy wallet if configured
+	var builder *clob.OrderBuilder
+	if cfg.UseProxyWallet() {
+		builder = clob.NewOrderBuilderWithProxy(w, cfg.CLOBApiKey, common.HexToAddress(cfg.ProxyWalletAddress))
+	} else {
+		builder = clob.NewOrderBuilder(w, cfg.CLOBApiKey)
+	}
 
 	return &BlackSwanHunter{
 		config:   cfg,
@@ -408,27 +415,37 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 
 // PlaceBet places a limit order for a Black Swan candidate.
 func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
-	// Calculate bet size (1-2% of bankroll)
-	betSize := h.bankroll * h.config.BlackSwanBetPercent
+	// Calculate bet amount in USD (% of bankroll)
+	betAmountUSD := h.bankroll * h.config.BlackSwanBetPercent
 
 	// Check if this would exceed max exposure
 	currentExposure := h.tracker.TotalExposure()
-	if currentExposure+betSize*candidate.BidPrice > h.config.BlackSwanMaxExposure {
-		remaining := h.config.BlackSwanMaxExposure - currentExposure
-		betSize = remaining / candidate.BidPrice
-		if betSize < 1.0 {
+	if currentExposure+betAmountUSD > h.config.BlackSwanMaxExposure {
+		betAmountUSD = h.config.BlackSwanMaxExposure - currentExposure
+		if betAmountUSD < 0.01 {
 			return fmt.Errorf("insufficient remaining exposure")
 		}
 	}
 
-	log.Printf("[blackswan] placing bet: %s %s at %.4f (%.2f¢) size=$%.2f",
+	// Convert USD amount to number of shares
+	// shares = USD / price (e.g., $0.75 / $0.01 = 75 shares)
+	shares := betAmountUSD / candidate.BidPrice
+
+	// Polymarket minimum order size is 5 shares
+	const minShares = 5.0
+	if shares < minShares {
+		shares = minShares
+		betAmountUSD = shares * candidate.BidPrice
+	}
+
+	log.Printf("[blackswan] placing bet: %s %s at %.4f (%.2f¢) shares=%.1f cost=$%.2f",
 		candidate.Market.Question, candidate.Outcome,
-		candidate.BidPrice, candidate.BidPrice*100, betSize)
+		candidate.BidPrice, candidate.BidPrice*100, shares, betAmountUSD)
 
 	if h.config.DryRun {
 		log.Printf("[blackswan] DRY_RUN: would place GTC limit order")
 
-		// Track as if placed
+		// Track as if placed (Size = shares for exposure tracking)
 		position := &OpenPosition{
 			OrderID:      fmt.Sprintf("dry-%d", time.Now().UnixNano()),
 			TokenID:      candidate.TokenID,
@@ -436,7 +453,7 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 			MarketTitle:  candidate.Market.Question,
 			Outcome:      candidate.Outcome,
 			BidPrice:     candidate.BidPrice,
-			Size:         betSize,
+			Size:         shares,
 			PlacedAt:     time.Now(),
 			CurrentPrice: candidate.CurrentPrice,
 			Status:       "open",
@@ -449,19 +466,19 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 				"Market: %s\n"+
 				"Side: %s\n"+
 				"Bid: %.4f (%.2f¢)\n"+
-				"Size: $%.2f\n"+
+				"Shares: %.1f ($%.2f)\n"+
 				"Potential: %.0fx return",
 				candidate.Market.Question, candidate.Outcome,
 				candidate.BidPrice, candidate.BidPrice*100,
-				betSize, 1.0/candidate.BidPrice)
+				shares, betAmountUSD, 1.0/candidate.BidPrice)
 			h.telegram.SendMessage(msg)
 		}
 
 		return nil
 	}
 
-	// Build GTC limit order
-	order, err := h.builder.BuildGTCBuyOrder(candidate.TokenID, candidate.BidPrice, betSize)
+	// Build GTC limit order (size = number of shares)
+	order, err := h.builder.BuildGTCBuyOrder(candidate.TokenID, candidate.BidPrice, shares)
 	if err != nil {
 		return fmt.Errorf("failed to build order: %w", err)
 	}
@@ -476,7 +493,7 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 		return fmt.Errorf("order rejected: %s", resp.Error)
 	}
 
-	// Track the position
+	// Track the position (Size = shares)
 	position := &OpenPosition{
 		OrderID:      resp.OrderID,
 		TokenID:      candidate.TokenID,
@@ -484,7 +501,7 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 		MarketTitle:  candidate.Market.Question,
 		Outcome:      candidate.Outcome,
 		BidPrice:     candidate.BidPrice,
-		Size:         betSize,
+		Size:         shares,
 		PlacedAt:     time.Now(),
 		CurrentPrice: candidate.CurrentPrice,
 		Status:       "open",
@@ -499,11 +516,11 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 			"Market: %s\n"+
 			"Side: %s\n"+
 			"Bid: %.4f (%.2f¢)\n"+
-			"Size: $%.2f\n"+
+			"Shares: %.1f ($%.2f)\n"+
 			"Order: %s",
 			candidate.Market.Question, candidate.Outcome,
 			candidate.BidPrice, candidate.BidPrice*100,
-			betSize, resp.OrderID)
+			shares, betAmountUSD, resp.OrderID)
 		h.telegram.SendMessage(msg)
 	}
 

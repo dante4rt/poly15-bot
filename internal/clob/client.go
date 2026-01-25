@@ -196,6 +196,36 @@ func (c *Client) GetOpenOrders() ([]Order, error) {
 	return orders, nil
 }
 
+// GetBalanceAllowance fetches the balance and allowance for an asset type.
+// assetType: "COLLATERAL" for USDC, "CONDITIONAL" for position tokens
+// tokenID: required for CONDITIONAL, ignored for COLLATERAL
+func (c *Client) GetBalanceAllowance(assetType AssetType, tokenID string) (*BalanceAllowanceResponse, error) {
+	path := fmt.Sprintf("/balance-allowance?asset_type=%s", assetType)
+	if assetType == AssetTypeConditional && tokenID != "" {
+		path += fmt.Sprintf("&token_id=%s", tokenID)
+	}
+
+	resp, err := c.doRequest(http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get balance: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read body for debugging
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var balance BalanceAllowanceResponse
+	if err := json.Unmarshal(respBody, &balance); err != nil {
+		return nil, fmt.Errorf("failed to decode balance: %w (body: %s)", err, string(respBody))
+	}
+
+	return &balance, nil
+}
+
 // doRequest performs an authenticated HTTP request.
 func (c *Client) doRequest(method, path string, body []byte) (*http.Response, error) {
 	url := c.baseURL + path

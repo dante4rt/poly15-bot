@@ -1,4 +1,4 @@
-.PHONY: build run run-dry scan approve test clean docker-build docker-run docker-logs docker-stop sports sports-dry blackswan blackswan-dry derive-creds
+.PHONY: build run run-dry scan approve balance test clean docker-build docker-run docker-logs docker-stop sports sports-dry blackswan blackswan-dry derive-creds
 
 # Local development
 build:
@@ -6,6 +6,7 @@ build:
 	go build -o bin/sniper ./cmd/sniper
 	go build -o bin/scanner ./cmd/scanner
 	go build -o bin/approve ./cmd/approve
+	go build -o bin/balance ./cmd/balance
 	go build -o bin/sports ./cmd/sports
 	go build -o bin/blackswan ./cmd/blackswan
 	go build -o bin/derive-creds ./cmd/derive-creds
@@ -33,6 +34,9 @@ scan:
 
 approve:
 	./bin/approve
+
+balance:
+	./bin/balance
 
 derive-creds:
 	./bin/derive-creds

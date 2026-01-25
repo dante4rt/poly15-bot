@@ -15,6 +15,7 @@ import (
 	"github.com/dantezy/polymarket-sniper/internal/sports"
 	"github.com/dantezy/polymarket-sniper/internal/telegram"
 	"github.com/dantezy/polymarket-sniper/internal/wallet"
+	"github.com/ethereum/go-ethereum/common"
 )
 
 const (
@@ -66,12 +67,20 @@ func NewSportsSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*S
 		return nil, fmt.Errorf("wallet is required")
 	}
 
+	// Create order builder - use proxy wallet if configured
+	var builder *clob.OrderBuilder
+	if cfg.UseProxyWallet() {
+		builder = clob.NewOrderBuilderWithProxy(w, cfg.CLOBApiKey, common.HexToAddress(cfg.ProxyWalletAddress))
+	} else {
+		builder = clob.NewOrderBuilder(w, cfg.CLOBApiKey)
+	}
+
 	return &SportsSniper{
 		config:        cfg,
 		gamma:         gamma.NewClient(),
 		espn:          sports.NewESPNClient(),
 		clob:          clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, w.AddressHex()),
-		builder:       clob.NewOrderBuilder(w, cfg.CLOBApiKey),
+		builder:       builder,
 		telegram:      tg,
 		activeMarkets: make(map[string]*TrackedSportsMarket),
 	}, nil

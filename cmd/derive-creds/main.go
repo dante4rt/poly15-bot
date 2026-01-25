@@ -64,7 +64,7 @@ func main() {
 	fmt.Printf("Chain ID: %d\n", cfg.PolygonChainID)
 	fmt.Println()
 
-	// Derive API credentials
+	// Derive API credentials (always uses EOA, even with proxy wallet)
 	creds, err := deriveApiKey(w, int64(cfg.PolygonChainID))
 	if err != nil {
 		log.Fatalf("Failed to derive API credentials: %v", err)

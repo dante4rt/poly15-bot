@@ -27,20 +27,40 @@ const (
 
 // OrderBuilder constructs and signs orders for the CLOB.
 type OrderBuilder struct {
-	signer *wallet.Signer
-	maker  common.Address
-	apiKey string // API key used as owner for orders
-	nonce  *big.Int
+	signer           *wallet.Signer
+	maker            common.Address // The maker/funder address (proxy wallet if set, else EOA)
+	signerAddr       common.Address // The EOA that signs orders
+	apiKey           string         // API key used as owner for orders
+	nonce            *big.Int
+	useProxyWallet   bool           // True if using Gnosis Safe proxy wallet
 }
 
 // NewOrderBuilder creates a new OrderBuilder with the given wallet and API key.
+// This creates an EOA-mode builder (signature type 0).
 func NewOrderBuilder(w *wallet.Wallet, apiKey string) *OrderBuilder {
 	signer := wallet.NewSigner(w)
 	return &OrderBuilder{
-		signer: signer,
-		maker:  w.Address(),
-		apiKey: apiKey,
-		nonce:  big.NewInt(0),
+		signer:         signer,
+		maker:          w.Address(),
+		signerAddr:     w.Address(),
+		apiKey:         apiKey,
+		nonce:          big.NewInt(0),
+		useProxyWallet: false,
+	}
+}
+
+// NewOrderBuilderWithProxy creates an OrderBuilder that uses a Polymarket proxy wallet.
+// The proxyWalletAddress is the Gnosis Safe address that holds the user's funds.
+// Orders are signed by the EOA but use signature type 2 (PolyGnosis).
+func NewOrderBuilderWithProxy(w *wallet.Wallet, apiKey string, proxyWalletAddress common.Address) *OrderBuilder {
+	signer := wallet.NewSigner(w)
+	return &OrderBuilder{
+		signer:         signer,
+		maker:          proxyWalletAddress, // The proxy wallet is the maker/funder
+		signerAddr:     w.Address(),        // The EOA signs the orders
+		apiKey:         apiKey,
+		nonce:          big.NewInt(0),
+		useProxyWallet: true,
 	}
 }
 
@@ -158,11 +178,21 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 		return nil, fmt.Errorf("invalid token ID: %s", params.TokenID)
 	}
 
+	// Determine signature type based on wallet mode
+	var sigType uint8
+	if b.useProxyWallet {
+		sigType = wallet.SignatureTypePolyGnosis
+	} else {
+		sigType = wallet.SignatureTypeEOA
+	}
+
 	// Build the order struct for signing
+	// For proxy wallet: maker = proxy wallet, signer = EOA
+	// For EOA: maker = signer = EOA
 	order := &wallet.Order{
 		Salt:          salt,
 		Maker:         b.maker,
-		Signer:        b.maker,
+		Signer:        b.signerAddr,
 		Taker:         common.Address{}, // Any taker
 		TokenID:       tokenIDBig,
 		MakerAmount:   makerAmount,
@@ -171,7 +201,7 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 		Nonce:         new(big.Int).Set(b.nonce),
 		FeeRateBps:    big.NewInt(int64(feeRate)),
 		Side:          sideToUint8(params.Side),
-		SignatureType: wallet.SignatureTypeEOA,
+		SignatureType: sigType,
 	}
 
 	// Sign the order
@@ -184,8 +214,8 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 	apiOrder := Order{
 		Salt:          salt.Int64(),
 		Maker:         b.maker.Hex(),
-		Signer:        b.maker.Hex(),                      // signer is same as maker for EOA
-		Taker:         common.Address{}.Hex(),             // zero address for any taker
+		Signer:        b.signerAddr.Hex(),
+		Taker:         common.Address{}.Hex(), // zero address for any taker
 		TokenID:       params.TokenID,
 		MakerAmount:   makerAmount.String(),
 		TakerAmount:   takerAmount.String(),
@@ -193,7 +223,7 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 		Nonce:         b.nonce.String(),
 		FeeRateBps:    strconv.Itoa(feeRate),
 		Side:          string(params.Side),
-		SignatureType: int(wallet.SignatureTypeEOA),
+		SignatureType: int(sigType),
 		Signature:     signature,
 	}
 

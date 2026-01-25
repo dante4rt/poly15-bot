@@ -11,9 +11,10 @@ import (
 
 type Config struct {
 	// Wallet
-	PrivateKey     string
-	PolygonChainID int
-	PolygonRPCURL  string
+	PrivateKey         string
+	ProxyWalletAddress string // Polymarket proxy wallet (Gnosis Safe), empty = EOA mode
+	PolygonChainID     int
+	PolygonRPCURL      string
 
 	// CLOB API credentials
 	CLOBApiKey     string
@@ -112,6 +113,9 @@ func Load() (*Config, error) {
 	// Optional proxy config
 	cfg.ProxyURL = os.Getenv("PROXY_URL")
 
+	// Optional proxy wallet (Gnosis Safe)
+	cfg.ProxyWalletAddress = os.Getenv("PROXY_WALLET_ADDRESS")
+
 	return cfg, nil
 }
 
@@ -171,6 +175,11 @@ func LoadWithPrivateKey() (*Config, error) {
 // HasTelegram returns true if Telegram notifications are configured
 func (c *Config) HasTelegram() bool {
 	return c.TelegramBotToken != "" && c.TelegramChatID != ""
+}
+
+// UseProxyWallet returns true if trading via Polymarket proxy wallet
+func (c *Config) UseProxyWallet() bool {
+	return c.ProxyWalletAddress != ""
 }
 
 // Validate performs runtime validation of config values

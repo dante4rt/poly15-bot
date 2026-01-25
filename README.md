@@ -1,13 +1,14 @@
 # Polymarket Trading Bot
 
-Two strategies for Polymarket prediction markets.
+Three strategies for Polymarket prediction markets.
 
 ## Strategies
 
-| Strategy          | Command          | Description                                                              |
-| ----------------- | ---------------- | ------------------------------------------------------------------------ |
-| **Black Swan**    | `make blackswan` | Buy low-probability events (1-10¢) with limit orders. Power-law returns. |
-| **15-Min Sniper** | `make run`       | Snipe crypto up/down markets in final seconds. Low liquidity issue.      |
+| Strategy          | Command          | Description                                                 |
+| ----------------- | ---------------- | ----------------------------------------------------------- |
+| **Black Swan**    | `make blackswan` | Buy low-probability events (1-10¢) with GTC limit orders.   |
+| **Sports**        | `make sports`    | Snipe NFL/NBA markets when outcome becomes certain.         |
+| **15-Min Crypto** | `make run`       | Snipe crypto up/down markets in final seconds. Low volume.  |
 
 ## Quick Start
 
@@ -29,6 +30,16 @@ CLOB_SECRET=...
 CLOB_PASSPHRASE=...
 ```
 
+## Proxy Wallet (if deposited via UI)
+
+If you deposited USDC through Polymarket's web UI, your funds are in a **proxy wallet** (Gnosis Safe), not your EOA. Find your proxy address in Polymarket settings:
+
+```env
+PROXY_WALLET_ADDRESS=0x...  # Your Polymarket proxy wallet
+```
+
+Run `make balance` to check balances and positions.
+
 ## Black Swan Config
 
 ```env
@@ -44,11 +55,14 @@ BLACKSWAN_BID_DISCOUNT=0.25 # Bid 25% below market
 
 ```bash
 make build         # Build all
+make balance       # Check USDC balance and positions
 make approve       # USDC approval (one-time)
 make blackswan     # Black Swan (live)
-make blackswan-dry # Black Swan (test)
-make run           # 15-min sniper (live)
-make run-dry       # 15-min sniper (test)
+make blackswan-dry # Black Swan (dry run)
+make sports        # Sports sniper (live)
+make sports-dry    # Sports sniper (dry run)
+make run           # 15-min crypto (live)
+make run-dry       # 15-min crypto (dry run)
 ```
 
 ## Go Live
