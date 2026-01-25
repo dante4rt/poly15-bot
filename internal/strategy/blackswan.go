@@ -326,10 +326,19 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 
 	var candidates []BlackSwanCandidate
 	skippedVolume := 0
+	skippedEnded := 0
 
+	now := time.Now()
 	for _, market := range markets {
 		// Skip 15-min markets (use sniper for those)
 		if market.Is15MinMarket() {
+			continue
+		}
+
+		// Skip markets that have already ended
+		endTime, _ := market.EndTime()
+		if !endTime.IsZero() && endTime.Before(now) {
+			skippedEnded++
 			continue
 		}
 
@@ -347,29 +356,14 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 			continue
 		}
 
-		// Skip markets with too much volume (probably too efficient)
-		if h.config.BlackSwanMaxVolume > 0 && volume24hr > h.config.BlackSwanMaxVolume {
-			continue
-		}
+		// NOTE: Removed max volume filter - high volume markets can still have black swan outcomes
+		// Example: Government shutdown at $6M volume can still have 1% YES outcomes worth betting on
 
 		// Get tokens and prices
 		yesToken := market.GetYesToken()
 		noToken := market.GetNoToken()
 		if yesToken == nil || noToken == nil {
 			continue
-		}
-
-		// Debug: log first few high-volume markets to see their prices
-		if volume24hr >= 1000 && len(candidates) == 0 {
-			title := market.Question
-			if len(title) > 50 {
-				title = title[:50]
-			}
-			log.Printf("[blackswan] checking: %s - YES=%.4f (%.2f¢) NO=%.4f (%.2f¢) vol=$%.0f",
-				title,
-				yesToken.Price, yesToken.Price*100,
-				noToken.Price, noToken.Price*100,
-				volume24hr)
 		}
 
 		// Check YES side for black swan opportunity
@@ -391,8 +385,8 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 		}
 	}
 
-	if skippedVolume > 0 {
-		log.Printf("[blackswan] filtered out: %d markets with <$1000 24hr volume", skippedVolume)
+	if skippedEnded > 0 || skippedVolume > 0 {
+		log.Printf("[blackswan] filtered: %d already ended, %d low volume (<$1000 24hr)", skippedEnded, skippedVolume)
 	}
 
 	return candidates, nil
@@ -400,8 +394,11 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 
 // isBlackSwanCandidate checks if a price qualifies as a black swan opportunity.
 func (h *BlackSwanHunter) isBlackSwanCandidate(price, oppositePrice float64) bool {
-	// Price must be in target range (0.1¢ - 5¢)
-	if price < h.config.BlackSwanMinPrice || price > h.config.BlackSwanMaxPrice {
+	// Price must be in target range (e.g., 0.5¢ - 10¢)
+	if price < h.config.BlackSwanMinPrice {
+		return false
+	}
+	if price > h.config.BlackSwanMaxPrice {
 		return false
 	}
 
@@ -416,9 +413,18 @@ func (h *BlackSwanHunter) isBlackSwanCandidate(price, oppositePrice float64) boo
 // buildCandidate creates a BlackSwanCandidate for the YES side.
 func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken *gamma.Token) *BlackSwanCandidate {
 	endTime, _ := market.EndTime()
-	if endTime.IsZero() || endTime.Before(time.Now().Add(24*time.Hour)) {
-		// Skip markets ending too soon (less than 24h)
+
+	now := time.Now()
+
+	// Check if market has already ended (API sometimes returns resolved markets as "active")
+	if !endTime.IsZero() && endTime.Before(now) {
+		// Market already ended - skip it
 		return nil
+	}
+
+	// If no end date, allow it (many markets don't have explicit end dates yet)
+	if endTime.IsZero() {
+		endTime = now.Add(30 * 24 * time.Hour) // Default to 30 days
 	}
 
 	// Calculate bid price (discount from current price)
@@ -457,8 +463,17 @@ func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken 
 // buildCandidateNo creates a BlackSwanCandidate for the NO side.
 func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToken *gamma.Token) *BlackSwanCandidate {
 	endTime, _ := market.EndTime()
-	if endTime.IsZero() || endTime.Before(time.Now().Add(24*time.Hour)) {
+
+	now := time.Now()
+
+	// Check if market has already ended
+	if !endTime.IsZero() && endTime.Before(now) {
 		return nil
+	}
+
+	// If no end date, allow it
+	if endTime.IsZero() {
+		endTime = now.Add(30 * 24 * time.Hour)
 	}
 
 	bidPrice := noToken.Price * (1 - h.config.BlackSwanBidDiscount)
