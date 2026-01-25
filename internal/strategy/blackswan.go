@@ -163,10 +163,19 @@ func NewBlackSwanHunter(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) 
 		gammaClient = gamma.NewClient()
 	}
 
-	// Create CLOB client with optional proxy
+	// Create CLOB client with optional proxy rotation
 	var clobClient *clob.Client
 	walletAddr := w.AddressHex()
-	if cfg.ProxyURL != "" {
+	if len(cfg.ProxyURLs) > 1 {
+		// Multiple proxies - use rotation
+		log.Printf("[blackswan] using %d proxies with rotation", len(cfg.ProxyURLs))
+		var err error
+		clobClient, err = clob.NewClientWithProxyRotation(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, walletAddr, cfg.ProxyURLs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create CLOB client with proxy rotation: %w", err)
+		}
+	} else if cfg.ProxyURL != "" {
+		// Single proxy
 		log.Printf("[blackswan] using proxy: %s", maskProxy(cfg.ProxyURL))
 		var err error
 		clobClient, err = clob.NewClientWithProxy(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, walletAddr, cfg.ProxyURL)

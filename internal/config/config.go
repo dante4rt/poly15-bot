@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -21,8 +22,9 @@ type Config struct {
 	CLOBSecret     string
 	CLOBPassphrase string
 
-	// Proxy (optional)
-	ProxyURL string // SOCKS5 proxy: user:pass@host:port
+	// Proxy (optional) - supports multiple proxies comma-separated
+	ProxyURL  string   // Single proxy (legacy): user:pass@host:port
+	ProxyURLs []string // Multiple proxies for rotation
 
 	// Telegram notifications (optional)
 	TelegramBotToken string
@@ -110,8 +112,20 @@ func Load() (*Config, error) {
 	cfg.TelegramBotToken = os.Getenv("TELEGRAM_BOT_TOKEN")
 	cfg.TelegramChatID = os.Getenv("TELEGRAM_CHAT_ID")
 
-	// Optional proxy config
-	cfg.ProxyURL = os.Getenv("PROXY_URL")
+	// Optional proxy config - supports comma-separated list
+	proxyEnv := os.Getenv("PROXY_URL")
+	if proxyEnv != "" {
+		proxies := strings.Split(proxyEnv, ",")
+		for _, p := range proxies {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				cfg.ProxyURLs = append(cfg.ProxyURLs, p)
+			}
+		}
+		if len(cfg.ProxyURLs) > 0 {
+			cfg.ProxyURL = cfg.ProxyURLs[0] // First proxy as default
+		}
+	}
 
 	// Optional proxy wallet (Gnosis Safe)
 	cfg.ProxyWalletAddress = os.Getenv("PROXY_WALLET_ADDRESS")

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -35,6 +36,10 @@ type Client struct {
 	address    string // wallet address
 	httpClient *http.Client
 	baseURL    string
+
+	// Proxy rotation support
+	proxyURLs    []string
+	currentProxy int
 }
 
 // NewClient creates a new CLOB API client.
@@ -106,6 +111,74 @@ func NewClientWithProxy(apiKey, secret, passphrase, address, proxyURL string) (*
 		},
 		baseURL: baseURL,
 	}, nil
+}
+
+// NewClientWithProxyRotation creates a CLOB client that rotates through multiple proxies on failure.
+func NewClientWithProxyRotation(apiKey, secret, passphrase, address string, proxyURLs []string) (*Client, error) {
+	if len(proxyURLs) == 0 {
+		return NewClient(apiKey, secret, passphrase, address), nil
+	}
+
+	// Create client with first proxy, store all proxies for rotation
+	client, err := NewClientWithProxy(apiKey, secret, passphrase, address, proxyURLs[0])
+	if err != nil {
+		return nil, err
+	}
+
+	client.proxyURLs = proxyURLs
+	client.currentProxy = 0
+
+	return client, nil
+}
+
+// rotateProxy switches to the next proxy in the list
+func (c *Client) rotateProxy() error {
+	if len(c.proxyURLs) <= 1 {
+		return fmt.Errorf("no more proxies to rotate")
+	}
+
+	prevProxy := c.currentProxy
+	c.currentProxy = (c.currentProxy + 1) % len(c.proxyURLs)
+	proxyURL := c.proxyURLs[c.currentProxy]
+
+	log.Printf("[clob] rotating proxy %d -> %d (of %d)", prevProxy+1, c.currentProxy+1, len(c.proxyURLs))
+
+	var transport *http.Transport
+
+	if strings.HasPrefix(proxyURL, "socks5://") {
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			return fmt.Errorf("failed to parse SOCKS5 proxy URL: %w", err)
+		}
+
+		var auth *proxy.Auth
+		if u.User != nil {
+			auth = &proxy.Auth{User: u.User.Username()}
+			if pass, ok := u.User.Password(); ok {
+				auth.Password = pass
+			}
+		}
+
+		dialer, err := proxy.SOCKS5("tcp", u.Host, auth, proxy.Direct)
+		if err != nil {
+			return fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
+		}
+
+		transport = &http.Transport{Dial: dialer.Dial}
+	} else {
+		proxyURLParsed, err := url.Parse("http://" + proxyURL)
+		if err != nil {
+			return fmt.Errorf("failed to parse proxy URL: %w", err)
+		}
+		transport = &http.Transport{Proxy: http.ProxyURL(proxyURLParsed)}
+	}
+
+	c.httpClient = &http.Client{
+		Timeout:   defaultTimeout,
+		Transport: transport,
+	}
+
+	return nil
 }
 
 // WithHTTPClient sets a custom HTTP client.
@@ -240,8 +313,47 @@ func (c *Client) GetBalanceAllowance(assetType AssetType, tokenID string) (*Bala
 	return &balance, nil
 }
 
-// doRequest performs an authenticated HTTP request.
+// doRequest performs an authenticated HTTP request with automatic proxy rotation on 403.
 func (c *Client) doRequest(method, path string, body []byte) (*http.Response, error) {
+	maxRetries := len(c.proxyURLs)
+	if maxRetries == 0 {
+		maxRetries = 1 // At least one attempt without proxy rotation
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		resp, err := c.doRequestOnce(method, path, body)
+		if err != nil {
+			lastErr = err
+			// Network error - try rotating proxy
+			if len(c.proxyURLs) > 1 {
+				if rotateErr := c.rotateProxy(); rotateErr == nil {
+					continue
+				}
+			}
+			return nil, err
+		}
+
+		// Check for Cloudflare 403 block
+		if resp.StatusCode == http.StatusForbidden && len(c.proxyURLs) > 1 {
+			log.Printf("[clob] got 403 (Cloudflare block), rotating proxy...")
+			resp.Body.Close()
+			if rotateErr := c.rotateProxy(); rotateErr == nil {
+				continue // Retry with new proxy
+			}
+		}
+
+		return resp, nil
+	}
+
+	if lastErr != nil {
+		return nil, fmt.Errorf("all proxies failed: %w", lastErr)
+	}
+	return nil, fmt.Errorf("all proxies returned 403")
+}
+
+// doRequestOnce performs a single authenticated HTTP request.
+func (c *Client) doRequestOnce(method, path string, body []byte) (*http.Response, error) {
 	url := c.baseURL + path
 	timestamp := strconv.FormatInt(time.Now().Unix(), 10)
 
