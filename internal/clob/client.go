@@ -271,16 +271,20 @@ func (c *Client) GetOpenOrders() ([]Order, error) {
 	}
 	defer resp.Body.Close()
 
+	// Read body for debugging
+	respBody, _ := io.ReadAll(resp.Body)
+
 	if resp.StatusCode != http.StatusOK {
-		return nil, c.parseError(resp)
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var orders []Order
-	if err := json.NewDecoder(resp.Body).Decode(&orders); err != nil {
-		return nil, fmt.Errorf("failed to decode orders: %w", err)
+	// API returns object wrapper: {"orders": [...]}
+	var response OpenOrdersResponse
+	if err := json.Unmarshal(respBody, &response); err != nil {
+		return nil, fmt.Errorf("failed to decode orders: %w (body: %s)", err, string(respBody))
 	}
 
-	return orders, nil
+	return response.Orders, nil
 }
 
 // GetBalanceAllowance fetches the balance and allowance for an asset type.
