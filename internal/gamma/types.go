@@ -27,15 +27,15 @@ type Market struct {
 	// Gamma's indicative prices (more accurate than CLOB order book)
 	BestBid float64 `json:"bestBid"`
 	BestAsk float64 `json:"bestAsk"`
-	// Volume and activity tracking (API returns these as strings)
-	Volume         string `json:"volume"`
-	Volume24hr     string `json:"volume24hr"`
-	Liquidity      string `json:"liquidity"`
-	VolumeNum      string `json:"volumeNum"`
-	Volume24hrClob string `json:"volume24hrClob"`
-	LastTradePrice string `json:"lastTradePrice"`
-	UpdatedAt      string `json:"updatedAt"`
-	CreatedAt      string `json:"createdAt"`
+	// Volume and activity tracking (API returns mixed string/number types)
+	Volume         json.Number `json:"volume"`
+	Volume24hr     json.Number `json:"volume24hr"`
+	Liquidity      json.Number `json:"liquidity"`
+	VolumeNum      json.Number `json:"volumeNum"`
+	Volume24hrClob json.Number `json:"volume24hrClob"`
+	LastTradePrice json.Number `json:"lastTradePrice"`
+	UpdatedAt      string      `json:"updatedAt"`
+	CreatedAt      string      `json:"createdAt"`
 }
 
 // GetConditionID returns the condition ID (handles both field names)
@@ -215,22 +215,22 @@ type SearchParams struct {
 // GetVolume returns the best available volume metric.
 func (m *Market) GetVolume() float64 {
 	// Prefer 24hr volume, then total volume
-	if v, _ := strconv.ParseFloat(m.Volume24hr, 64); v > 0 {
+	if v, err := m.Volume24hr.Float64(); err == nil && v > 0 {
 		return v
 	}
-	if v, _ := strconv.ParseFloat(m.Volume24hrClob, 64); v > 0 {
+	if v, err := m.Volume24hrClob.Float64(); err == nil && v > 0 {
 		return v
 	}
-	if v, _ := strconv.ParseFloat(m.VolumeNum, 64); v > 0 {
+	if v, err := m.VolumeNum.Float64(); err == nil && v > 0 {
 		return v
 	}
-	v, _ := strconv.ParseFloat(m.Volume, 64)
+	v, _ := m.Volume.Float64()
 	return v
 }
 
 // GetLiquidity returns the market liquidity.
 func (m *Market) GetLiquidity() float64 {
-	v, _ := strconv.ParseFloat(m.Liquidity, 64)
+	v, _ := m.Liquidity.Float64()
 	return v
 }
 
