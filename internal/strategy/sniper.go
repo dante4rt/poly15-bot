@@ -480,6 +480,12 @@ func (s *Sniper) CheckAndSnipe() error {
 
 		timeRemaining := tracked.EndTime.Sub(now)
 
+		// Poll prices via REST (since WebSocket may not be connected)
+		// Only poll when getting close to snipe window (within 30s)
+		if timeRemaining <= 30*time.Second && timeRemaining > 0 {
+			s.updateOrderBookPrices(tracked)
+		}
+
 		// Skip if not within snipe window yet
 		if timeRemaining > time.Duration(s.config.TriggerSeconds)*time.Second {
 			continue
