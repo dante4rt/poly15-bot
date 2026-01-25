@@ -347,6 +347,7 @@ func (s *Sniper) Run(ctx context.Context) error {
 			s.cleanupExpiredMarkets()
 
 		case <-statusTicker.C:
+			s.refreshAllGammaPrices()
 			s.logStatus()
 		}
 	}
@@ -473,6 +474,20 @@ func (s *Sniper) refreshGammaPrices(tracked *TrackedMarket) {
 		tracked.GammaYesPrice = prices[0]
 		tracked.GammaNoPrice = prices[1]
 		tracked.mu.Unlock()
+	}
+}
+
+// refreshAllGammaPrices refreshes Gamma prices for all tracked markets.
+func (s *Sniper) refreshAllGammaPrices() {
+	s.mu.RLock()
+	markets := make([]*TrackedMarket, 0, len(s.activeMarkets))
+	for _, m := range s.activeMarkets {
+		markets = append(markets, m)
+	}
+	s.mu.RUnlock()
+
+	for _, tracked := range markets {
+		s.refreshGammaPrices(tracked)
 	}
 }
 
