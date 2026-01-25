@@ -8,15 +8,19 @@ import (
 
 // Market represents a prediction market from the Gamma API.
 type Market struct {
-	ConditionID  string  `json:"condition_id"`
-	QuestionID   string  `json:"question_id"`
-	Question     string  `json:"question"`
-	Slug         string  `json:"slug"`
-	EndDateISO   string  `json:"end_date_iso"`
-	GameStartTime string `json:"game_start_time"`
-	Active       bool    `json:"active"`
-	Closed       bool    `json:"closed"`
-	Tokens       []Token `json:"tokens"`
+	ConditionID   string   `json:"condition_id"`
+	QuestionID    string   `json:"question_id"`
+	Question      string   `json:"question"`
+	Slug          string   `json:"slug"`
+	EndDateISO    string   `json:"end_date_iso"`
+	GameStartTime string   `json:"game_start_time"`
+	Active        bool     `json:"active"`
+	Closed        bool     `json:"closed"`
+	Tokens        []Token  `json:"tokens"`
+	// 15M markets use these fields instead
+	ClobTokenIDs  []string `json:"clob_token_ids"`
+	Outcomes      []string `json:"outcomes"`
+	OutcomePrices []string `json:"outcome_prices"`
 }
 
 // Is15MinMarket returns true if this is a 15-minute up/down market.
@@ -79,10 +83,28 @@ func (m *Market) IsExpiringSoon(within time.Duration) bool {
 
 // GetYesToken returns the "Yes" or "Up" outcome token if present.
 func (m *Market) GetYesToken() *Token {
+	// Check standard tokens array first
 	for i := range m.Tokens {
 		o := strings.ToLower(m.Tokens[i].Outcome)
 		if o == "yes" || o == "up" {
 			return &m.Tokens[i]
+		}
+	}
+	// Check 15M market format (ClobTokenIDs + Outcomes)
+	if len(m.ClobTokenIDs) >= 2 && len(m.Outcomes) >= 2 {
+		for i, outcome := range m.Outcomes {
+			o := strings.ToLower(outcome)
+			if o == "yes" || o == "up" {
+				price := 0.0
+				if i < len(m.OutcomePrices) {
+					price, _ = strconv.ParseFloat(m.OutcomePrices[i], 64)
+				}
+				return &Token{
+					TokenID: m.ClobTokenIDs[i],
+					Outcome: outcome,
+					Price:   price,
+				}
+			}
 		}
 	}
 	return nil
@@ -90,10 +112,28 @@ func (m *Market) GetYesToken() *Token {
 
 // GetNoToken returns the "No" or "Down" outcome token if present.
 func (m *Market) GetNoToken() *Token {
+	// Check standard tokens array first
 	for i := range m.Tokens {
 		o := strings.ToLower(m.Tokens[i].Outcome)
 		if o == "no" || o == "down" {
 			return &m.Tokens[i]
+		}
+	}
+	// Check 15M market format (ClobTokenIDs + Outcomes)
+	if len(m.ClobTokenIDs) >= 2 && len(m.Outcomes) >= 2 {
+		for i, outcome := range m.Outcomes {
+			o := strings.ToLower(outcome)
+			if o == "no" || o == "down" {
+				price := 0.0
+				if i < len(m.OutcomePrices) {
+					price, _ = strconv.ParseFloat(m.OutcomePrices[i], 64)
+				}
+				return &Token{
+					TokenID: m.ClobTokenIDs[i],
+					Outcome: outcome,
+					Price:   price,
+				}
+			}
 		}
 	}
 	return nil
