@@ -155,7 +155,13 @@ func NewBlackSwanHunter(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) 
 		return nil, fmt.Errorf("wallet is required")
 	}
 
-	gammaClient := gamma.NewClient()
+	// Create Gamma client with optional proxy
+	var gammaClient *gamma.Client
+	if cfg.ProxyURL != "" {
+		gammaClient = gamma.NewClientWithProxy(cfg.ProxyURL)
+	} else {
+		gammaClient = gamma.NewClient()
+	}
 
 	// Create CLOB client with optional proxy
 	var clobClient *clob.Client

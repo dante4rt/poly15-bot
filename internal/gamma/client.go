@@ -44,6 +44,38 @@ func NewClientWithTimeout(timeout time.Duration) *Client {
 	}
 }
 
+// NewClientWithProxy creates a new Gamma API client with HTTP proxy support.
+func NewClientWithProxy(proxyURL string) *Client {
+	proxyURLParsed, _ := url.Parse("http://" + proxyURL)
+	transport := &http.Transport{
+		Proxy: http.ProxyURL(proxyURLParsed),
+	}
+	return &Client{
+		httpClient: &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: transport,
+		},
+		baseURL: baseURL,
+	}
+}
+
+// doGet performs a GET request with browser-like headers.
+func (c *Client) doGet(endpoint string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	// Browser-like headers to help bypass Cloudflare
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+	req.Header.Set("Accept", "application/json, text/plain, */*")
+	req.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	req.Header.Set("Origin", "https://polymarket.com")
+	req.Header.Set("Referer", "https://polymarket.com/")
+
+	return c.httpClient.Do(req)
+}
+
 // SearchMarkets queries the Gamma API for markets matching the given query.
 func (c *Client) SearchMarkets(query string) ([]Market, error) {
 	params := url.Values{}
@@ -54,7 +86,7 @@ func (c *Client) SearchMarkets(query string) ([]Market, error) {
 
 	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, params.Encode())
 
-	resp, err := c.httpClient.Get(endpoint)
+	resp, err := c.doGet(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch markets: %w", err)
 	}
@@ -140,7 +172,7 @@ func (c *Client) GetMarketBySlug(slug string) (*Market, error) {
 
 	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, params.Encode())
 
-	resp, err := c.httpClient.Get(endpoint)
+	resp, err := c.doGet(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch market: %w", err)
 	}
@@ -207,7 +239,7 @@ func (c *Client) SearchMarketsWithParams(params SearchParams) ([]Market, error) 
 
 	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, queryParams.Encode())
 
-	resp, err := c.httpClient.Get(endpoint)
+	resp, err := c.doGet(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch markets: %w", err)
 	}
@@ -332,7 +364,7 @@ func (c *Client) GetNFLPlayoffMarkets() ([]Market, error) {
 func (c *Client) GetMarketByConditionID(conditionID string) (*Market, error) {
 	endpoint := fmt.Sprintf("%s/markets/%s", c.baseURL, url.PathEscape(conditionID))
 
-	resp, err := c.httpClient.Get(endpoint)
+	resp, err := c.doGet(endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch market: %w", err)
 	}
