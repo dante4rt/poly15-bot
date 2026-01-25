@@ -310,11 +310,13 @@ func (h *BlackSwanHunter) ScanAndBet() error {
 
 // FindCandidates searches for markets matching Black Swan criteria.
 func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
-	// Fetch a large number of active markets
+	// Fetch markets sorted by 24hr volume (most active first)
 	params := gamma.SearchParams{
-		Active: true,
-		Closed: false,
-		Limit:  500,
+		Active:  true,
+		Closed:  false,
+		Limit:   500,
+		OrderBy: "volume24hr",
+		Order:   "DESC",
 	}
 
 	markets, err := h.gamma.SearchMarketsWithParams(params)
@@ -323,10 +325,29 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 	}
 
 	var candidates []BlackSwanCandidate
+	skippedInactive := 0
+	skippedVolume := 0
 
 	for _, market := range markets {
 		// Skip 15-min markets (use sniper for those)
 		if market.Is15MinMarket() {
+			continue
+		}
+
+		// IMPORTANT: Skip markets with no recent activity (dead markets)
+		// Must have activity within last 30 days
+		if !market.HasRecentActivity(30 * 24 * time.Hour) {
+			skippedInactive++
+			continue
+		}
+
+		// Check volume is within configured range
+		volume := market.GetVolume()
+		if h.config.BlackSwanMinVolume > 0 && volume < h.config.BlackSwanMinVolume {
+			skippedVolume++
+			continue
+		}
+		if h.config.BlackSwanMaxVolume > 0 && volume > h.config.BlackSwanMaxVolume {
 			continue
 		}
 
@@ -341,6 +362,7 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 		if h.isBlackSwanCandidate(yesToken.Price, noToken.Price) {
 			candidate := h.buildCandidate(market, yesToken, noToken)
 			if candidate != nil {
+				candidate.Volume = volume
 				candidates = append(candidates, *candidate)
 			}
 		}
@@ -349,9 +371,14 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 		if h.isBlackSwanCandidate(noToken.Price, yesToken.Price) {
 			candidate := h.buildCandidateNo(market, noToken, yesToken)
 			if candidate != nil {
+				candidate.Volume = volume
 				candidates = append(candidates, *candidate)
 			}
 		}
+	}
+
+	if skippedInactive > 0 || skippedVolume > 0 {
+		log.Printf("[blackswan] filtered out: %d inactive (no activity 30d), %d low volume", skippedInactive, skippedVolume)
 	}
 
 	return candidates, nil
@@ -386,8 +413,19 @@ func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken 
 		bidPrice = h.config.BlackSwanMinPrice
 	}
 
-	// Score the opportunity (lower price + higher opposite confidence = better)
-	score := (1 - yesToken.Price) * noToken.Price * 100
+	// Score the opportunity:
+	// - Lower price = better payout potential
+	// - Higher opposite confidence = more mispriced
+	// - Higher volume = more likely to fill (log scale to avoid dominating)
+	volume := market.GetVolume()
+	volumeBonus := 1.0
+	if volume > 100 {
+		volumeBonus = 1.0 + (volume / 10000) // Bonus up to ~2x for high volume
+		if volumeBonus > 2.0 {
+			volumeBonus = 2.0
+		}
+	}
+	score := (1 - yesToken.Price) * noToken.Price * 100 * volumeBonus
 
 	return &BlackSwanCandidate{
 		Market:        market,
@@ -396,6 +434,7 @@ func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken 
 		CurrentPrice:  yesToken.Price,
 		BidPrice:      bidPrice,
 		Score:         score,
+		Volume:        volume,
 		EndTime:       endTime,
 		OverConfident: noToken.Price >= 0.90,
 	}
@@ -413,7 +452,16 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 		bidPrice = h.config.BlackSwanMinPrice
 	}
 
-	score := (1 - noToken.Price) * yesToken.Price * 100
+	// Score with volume bonus
+	volume := market.GetVolume()
+	volumeBonus := 1.0
+	if volume > 100 {
+		volumeBonus = 1.0 + (volume / 10000)
+		if volumeBonus > 2.0 {
+			volumeBonus = 2.0
+		}
+	}
+	score := (1 - noToken.Price) * yesToken.Price * 100 * volumeBonus
 
 	return &BlackSwanCandidate{
 		Market:        market,
@@ -422,6 +470,7 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 		CurrentPrice:  noToken.Price,
 		BidPrice:      bidPrice,
 		Score:         score,
+		Volume:        volume,
 		EndTime:       endTime,
 		OverConfident: yesToken.Price >= 0.90,
 	}
@@ -480,10 +529,13 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 				"%s\n\n"+
 				"Side: %s @ %.2f¢\n"+
 				"Size: %.0f shares ($%.2f)\n"+
+				"Volume: $%.0f\n"+
 				"Potential: %.0fx",
 				candidate.Market.Question, candidate.Outcome,
 				candidate.BidPrice*100,
-				shares, betAmountUSD, 1.0/candidate.BidPrice)
+				shares, betAmountUSD,
+				candidate.Volume,
+				1.0/candidate.BidPrice)
 			h.telegram.SendMessage(msg)
 		}
 
@@ -525,19 +577,17 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 	log.Printf("[blackswan] ORDER PLACED: %s (order ID: %s)", candidate.Market.Question, resp.OrderID)
 
 	if h.telegram != nil {
-		// Shorten order ID for display
-		shortOrderID := resp.OrderID
-		if len(shortOrderID) > 14 {
-			shortOrderID = shortOrderID[:14] + "..."
-		}
 		msg := fmt.Sprintf("Bet Placed\n\n"+
 			"%s\n\n"+
 			"Side: %s @ %.2f¢\n"+
 			"Size: %.0f shares ($%.2f)\n"+
-			"ID: %s",
+			"Volume: $%.0f\n"+
+			"Potential: %.0fx",
 			candidate.Market.Question, candidate.Outcome,
 			candidate.BidPrice*100,
-			shares, betAmountUSD, shortOrderID)
+			shares, betAmountUSD,
+			candidate.Volume,
+			1.0/candidate.BidPrice)
 		h.telegram.SendMessage(msg)
 	}
 

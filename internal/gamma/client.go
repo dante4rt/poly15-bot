@@ -340,6 +340,19 @@ func (c *Client) SearchMarketsWithParams(params SearchParams) ([]Market, error) 
 		queryParams.Set("_offset", strconv.Itoa(params.Offset))
 	}
 
+	// Add sorting parameters - default to volume descending for active markets
+	orderBy := params.OrderBy
+	if orderBy == "" {
+		orderBy = "volume24hr"
+	}
+	queryParams.Set("_sort", orderBy)
+
+	order := params.Order
+	if order == "" {
+		order = "DESC"
+	}
+	queryParams.Set("_order", order)
+
 	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, queryParams.Encode())
 
 	resp, err := c.doGet(endpoint)

@@ -27,6 +27,15 @@ type Market struct {
 	// Gamma's indicative prices (more accurate than CLOB order book)
 	BestBid float64 `json:"bestBid"`
 	BestAsk float64 `json:"bestAsk"`
+	// Volume and activity tracking
+	Volume          float64 `json:"volume"`
+	Volume24hr      float64 `json:"volume24hr"`
+	Liquidity       float64 `json:"liquidity"`
+	VolumeNum       float64 `json:"volumeNum"`       // Alternative field name
+	Volume24hrClob  float64 `json:"volume24hrClob"`  // CLOB-specific volume
+	LastTradePrice  float64 `json:"lastTradePrice"`
+	UpdatedAt       string  `json:"updatedAt"`       // Last update timestamp
+	CreatedAt       string  `json:"createdAt"`
 }
 
 // GetConditionID returns the condition ID (handles both field names)
@@ -198,4 +207,53 @@ type SearchParams struct {
 	Closed bool
 	Limit  int
 	Offset int
+	// Sorting options
+	OrderBy string // e.g., "volume24hr", "liquidity", "updatedAt"
+	Order   string // "asc" or "desc"
+}
+
+// GetVolume returns the best available volume metric.
+func (m *Market) GetVolume() float64 {
+	// Prefer 24hr volume, then total volume
+	if m.Volume24hr > 0 {
+		return m.Volume24hr
+	}
+	if m.Volume24hrClob > 0 {
+		return m.Volume24hrClob
+	}
+	if m.VolumeNum > 0 {
+		return m.VolumeNum
+	}
+	return m.Volume
+}
+
+// GetLiquidity returns the market liquidity.
+func (m *Market) GetLiquidity() float64 {
+	return m.Liquidity
+}
+
+// HasRecentActivity checks if the market has activity within the given duration.
+func (m *Market) HasRecentActivity(within time.Duration) bool {
+	if m.UpdatedAt == "" {
+		return false
+	}
+	updated, err := time.Parse(time.RFC3339, m.UpdatedAt)
+	if err != nil {
+		return false
+	}
+	return time.Since(updated) <= within
+}
+
+// IsActive checks if market has meaningful trading activity.
+// Returns true if has 24hr volume > minVolume OR recent updates.
+func (m *Market) IsActive(minVolume float64) bool {
+	// Has meaningful volume
+	if m.GetVolume() >= minVolume {
+		return true
+	}
+	// Has recent activity (within 7 days)
+	if m.HasRecentActivity(7 * 24 * time.Hour) {
+		return true
+	}
+	return false
 }
