@@ -73,7 +73,7 @@ func Load() (*Config, error) {
 
 		// Black Swan defaults ($15 bankroll optimized)
 		BlackSwanMaxPrice:     getEnvFloat("BLACKSWAN_MAX_PRICE", 0.10),
-		BlackSwanMinPrice:     getEnvFloat("BLACKSWAN_MIN_PRICE", 0.005),
+		BlackSwanMinPrice:     getEnvFloat("BLACKSWAN_MIN_PRICE", 0.001), // 0.1¢ minimum
 		BlackSwanBetPercent:   getEnvFloat("BLACKSWAN_BET_PERCENT", 0.05),
 		BlackSwanMaxPositions: getEnvInt("BLACKSWAN_MAX_POSITIONS", 10),
 		BlackSwanMaxExposure:  getEnvFloat("BLACKSWAN_MAX_EXPOSURE", 10),

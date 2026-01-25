@@ -359,6 +359,19 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 			continue
 		}
 
+		// Debug: log first few high-volume markets to see their prices
+		if volume24hr >= 1000 && len(candidates) == 0 {
+			title := market.Question
+			if len(title) > 50 {
+				title = title[:50]
+			}
+			log.Printf("[blackswan] checking: %s - YES=%.4f (%.2f¢) NO=%.4f (%.2f¢) vol=$%.0f",
+				title,
+				yesToken.Price, yesToken.Price*100,
+				noToken.Price, noToken.Price*100,
+				volume24hr)
+		}
+
 		// Check YES side for black swan opportunity
 		if h.isBlackSwanCandidate(yesToken.Price, noToken.Price) {
 			candidate := h.buildCandidate(market, yesToken, noToken)
