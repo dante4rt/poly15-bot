@@ -104,11 +104,10 @@ func main() {
 
 	// Send startup notification
 	if tg != nil {
-		tg.SendMessage(fmt.Sprintf("Black Swan Hunter Started\n"+
-			"Mode: %s\n"+
+		tg.SendMessage(fmt.Sprintf("Bot Started [%s]\n\n"+
 			"Bankroll: $%.2f\n"+
-			"Price Range: %.2f¢ - %.1f¢\n"+
-			"Max Positions: %d",
+			"Target: %.1f¢ - %.0f¢\n"+
+			"Max Bets: %d",
 			mode, cfg.MaxPositionSize,
 			cfg.BlackSwanMinPrice*100, cfg.BlackSwanMaxPrice*100,
 			cfg.BlackSwanMaxPositions))

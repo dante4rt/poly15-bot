@@ -476,14 +476,13 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 		h.totalBets++
 
 		if h.telegram != nil {
-			msg := fmt.Sprintf("[DRY RUN] Black Swan Bet\n"+
-				"Market: %s\n"+
-				"Side: %s\n"+
-				"Bid: %.4f (%.2f¢)\n"+
-				"Shares: %.1f ($%.2f)\n"+
-				"Potential: %.0fx return",
+			msg := fmt.Sprintf("[DRY RUN] Bet\n\n"+
+				"%s\n\n"+
+				"Side: %s @ %.2f¢\n"+
+				"Size: %.0f shares ($%.2f)\n"+
+				"Potential: %.0fx",
 				candidate.Market.Question, candidate.Outcome,
-				candidate.BidPrice, candidate.BidPrice*100,
+				candidate.BidPrice*100,
 				shares, betAmountUSD, 1.0/candidate.BidPrice)
 			h.telegram.SendMessage(msg)
 		}
@@ -526,15 +525,19 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 	log.Printf("[blackswan] ORDER PLACED: %s (order ID: %s)", candidate.Market.Question, resp.OrderID)
 
 	if h.telegram != nil {
-		msg := fmt.Sprintf("Black Swan Bet Placed\n"+
-			"Market: %s\n"+
-			"Side: %s\n"+
-			"Bid: %.4f (%.2f¢)\n"+
-			"Shares: %.1f ($%.2f)\n"+
-			"Order: %s",
+		// Shorten order ID for display
+		shortOrderID := resp.OrderID
+		if len(shortOrderID) > 14 {
+			shortOrderID = shortOrderID[:14] + "..."
+		}
+		msg := fmt.Sprintf("Bet Placed\n\n"+
+			"%s\n\n"+
+			"Side: %s @ %.2f¢\n"+
+			"Size: %.0f shares ($%.2f)\n"+
+			"ID: %s",
 			candidate.Market.Question, candidate.Outcome,
-			candidate.BidPrice, candidate.BidPrice*100,
-			shares, betAmountUSD, resp.OrderID)
+			candidate.BidPrice*100,
+			shares, betAmountUSD, shortOrderID)
 		h.telegram.SendMessage(msg)
 	}
 
@@ -560,14 +563,6 @@ func (h *BlackSwanHunter) CheckPositions() error {
 		orderID := order.GetID()
 		if orderID != "" {
 			openOrderMap[orderID] = true
-		}
-	}
-
-	// Debug: log what we got from API vs what we're tracking
-	if len(openOrders) > 0 || len(h.tracker.GetAll()) > 0 {
-		log.Printf("[blackswan] API returned %d orders, tracking %d positions", len(openOrders), len(h.tracker.GetAll()))
-		for _, order := range openOrders {
-			log.Printf("[blackswan] API order: id=%s hash=%s orderHash=%s salt=%d", order.ID, order.Hash, order.OrderHash, order.Salt)
 		}
 	}
 
