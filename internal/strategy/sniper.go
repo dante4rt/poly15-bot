@@ -228,6 +228,10 @@ type Sniper struct {
 	maxLossPerTrade float64
 	dailyLossLimit  float64
 	minLiquidity    float64
+
+	// Configurable strategy parameters
+	minConfidence  float64
+	maxUncertainty float64
 }
 
 // NewSniper creates a new Sniper instance.
@@ -249,6 +253,16 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 		minLiq = defaultMinLiquidity
 	}
 
+	minConf := cfg.MinConfidence
+	if minConf <= 0 {
+		minConf = minWinnerConfidence
+	}
+
+	maxUncert := cfg.MaxUncertainty
+	if maxUncert <= 0 {
+		maxUncert = maxUncertaintyGap
+	}
+
 	sniper := &Sniper{
 		config:          cfg,
 		gamma:           gammaClient,
@@ -261,6 +275,8 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 		maxLossPerTrade: defaultMaxLossPerTrade,
 		dailyLossLimit:  defaultDailyLossLimit,
 		minLiquidity:    minLiq,
+		minConfidence:   minConf,
+		maxUncertainty:  maxUncert,
 	}
 
 	// Register global WebSocket handler for price updates
@@ -294,6 +310,8 @@ func (s *Sniper) Run(ctx context.Context) error {
 	log.Printf("[sniper] starting in %s mode", s.modeString())
 	log.Printf("[sniper] config: snipe_price=%.4f, trigger_seconds=%d, max_position=$%.2f",
 		s.config.SnipePrice, s.config.TriggerSeconds, s.config.MaxPositionSize)
+	log.Printf("[sniper] strategy: min_confidence=%.0f%%, max_uncertainty=%.0f%%",
+		s.minConfidence*100, s.maxUncertainty*100)
 	log.Printf("[sniper] risk: max_loss_per_trade=$%.2f, daily_limit=$%.2f",
 		s.maxLossPerTrade, s.dailyLossLimit)
 
@@ -644,18 +662,18 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 	}
 
 	// Check 1: Clear winner (Gamma price above threshold)
-	if winnerGammaPrice < minWinnerConfidence {
+	if winnerGammaPrice < s.minConfidence {
 		analysis.SkipReason = SkipReasonNoWinner
-		analysis.SkipDescription = fmt.Sprintf("%s gamma_price %.4f < threshold %.4f", analysis.Side, winnerGammaPrice, minWinnerConfidence)
+		analysis.SkipDescription = fmt.Sprintf("%s gamma_price %.4f < threshold %.4f", analysis.Side, winnerGammaPrice, s.minConfidence)
 		return analysis
 	}
 
 	// Check 2: Not too uncertain (sides not too close)
 	priceGap := winnerGammaPrice - loserGammaPrice
-	if priceGap < maxUncertaintyGap {
+	if priceGap < s.maxUncertainty {
 		analysis.SkipReason = SkipReasonTooUncertain
 		analysis.SkipDescription = fmt.Sprintf("price gap %.4f < threshold %.4f (UP:%.4f DOWN:%.4f)",
-			priceGap, maxUncertaintyGap, gammaYes, gammaNo)
+			priceGap, s.maxUncertainty, gammaYes, gammaNo)
 		return analysis
 	}
 
@@ -953,7 +971,7 @@ func (s *Sniper) logStatus() {
 			}
 			log.Printf("[status] %s - ends in %v", tracked.Market.Question, timeRemaining.Truncate(time.Second))
 			log.Printf("[status]   gamma: UP=%.1f%% DOWN=%.1f%% => likely %s", gammaYes*100, gammaNo*100, winner)
-			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade, UP side only)", prob*100, minWinnerConfidence*100)
+			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade, UP side only)", prob*100, s.minConfidence*100)
 		} else {
 			log.Printf("[status] %s - ENDED (cleanup pending)", tracked.Market.Question)
 		}

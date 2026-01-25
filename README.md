@@ -57,6 +57,8 @@ print(client.create_or_derive_api_creds())
 | `SNIPE_PRICE` | `0.99` | Max price to pay for winning outcome |
 | `TRIGGER_SECONDS` | `1` | Seconds before market end to trigger |
 | `MIN_LIQUIDITY` | `5` | Min USD liquidity required at ask |
+| `MIN_CONFIDENCE` | `0.50` | Min winner probability to trade (0.50 = 50%) |
+| `MAX_UNCERTAINTY` | `0.10` | Max price gap to skip as "too close" (0.10 = 10%) |
 | `TELEGRAM_BOT_TOKEN` | - | Telegram bot token (optional) |
 | `TELEGRAM_CHAT_ID` | - | Telegram chat ID (optional) |
 

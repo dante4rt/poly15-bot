@@ -30,6 +30,10 @@ type Config struct {
 	SnipePrice      float64
 	TriggerSeconds  int
 	MinLiquidity    float64
+
+	// Strategy parameters
+	MinConfidence  float64 // Minimum winner confidence (e.g., 0.50 = 50%)
+	MaxUncertainty float64 // Max gap between sides to consider uncertain (e.g., 0.10 = 10%)
 }
 
 func Load() (*Config, error) {
@@ -48,6 +52,8 @@ func Load() (*Config, error) {
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
 		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
+		MinConfidence:   getEnvFloat("MIN_CONFIDENCE", 0.50),
+		MaxUncertainty:  getEnvFloat("MAX_UNCERTAINTY", 0.10),
 	}
 
 	var missingFields []string
@@ -101,6 +107,8 @@ func LoadMinimal() (*Config, error) {
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
 		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
+		MinConfidence:   getEnvFloat("MIN_CONFIDENCE", 0.50),
+		MaxUncertainty:  getEnvFloat("MAX_UNCERTAINTY", 0.10),
 		PrivateKey:      os.Getenv("PRIVATE_KEY"),
 	}, nil
 }
@@ -122,6 +130,8 @@ func LoadWithPrivateKey() (*Config, error) {
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
 		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
+		MinConfidence:   getEnvFloat("MIN_CONFIDENCE", 0.50),
+		MaxUncertainty:  getEnvFloat("MAX_UNCERTAINTY", 0.10),
 	}
 
 	cfg.PrivateKey = os.Getenv("PRIVATE_KEY")
