@@ -265,7 +265,7 @@ func (c *Client) CancelOrder(orderID string) error {
 
 // GetOpenOrders fetches all open orders for the authenticated user.
 func (c *Client) GetOpenOrders() ([]Order, error) {
-	resp, err := c.doRequest(http.MethodGet, "/orders", nil)
+	resp, err := c.doRequest(http.MethodGet, "/data/orders", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get open orders: %w", err)
 	}
