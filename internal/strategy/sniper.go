@@ -305,10 +305,12 @@ func (s *Sniper) Run(ctx context.Context) error {
 	scanTicker := time.NewTicker(scanInterval)
 	checkTicker := time.NewTicker(checkInterval)
 	cleanupTicker := time.NewTicker(cleanupInterval)
+	statusTicker := time.NewTicker(60 * time.Second) // Log status every minute
 
 	defer scanTicker.Stop()
 	defer checkTicker.Stop()
 	defer cleanupTicker.Stop()
+	defer statusTicker.Stop()
 
 	for {
 		select {
@@ -332,6 +334,9 @@ func (s *Sniper) Run(ctx context.Context) error {
 
 		case <-cleanupTicker.C:
 			s.cleanupExpiredMarkets()
+
+		case <-statusTicker.C:
+			s.logStatus()
 		}
 	}
 }
@@ -846,5 +851,29 @@ func (s *Sniper) GetStats() Stats {
 		TriggerSecs:     s.config.TriggerSeconds,
 		DailyLoss:       s.dailyStats.GetTotalLoss(),
 		DailyTradeCount: s.dailyStats.TradeCount,
+	}
+}
+
+// logStatus logs the current status of tracked markets.
+func (s *Sniper) logStatus() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.activeMarkets) == 0 {
+		log.Printf("[status] no markets tracked, waiting for new markets...")
+		return
+	}
+
+	now := time.Now()
+	for _, tracked := range s.activeMarkets {
+		timeRemaining := tracked.EndTime.Sub(now)
+		yesBid, yesAsk, noBid, noAsk := tracked.GetPrices()
+
+		if timeRemaining > 0 {
+			log.Printf("[status] %s - ends in %v", tracked.Market.Question, timeRemaining.Truncate(time.Second))
+			log.Printf("[status]   YES(bid:%.4f/ask:%.4f) NO(bid:%.4f/ask:%.4f)", yesBid, yesAsk, noBid, noAsk)
+		} else {
+			log.Printf("[status] %s - ENDED (cleanup pending)", tracked.Market.Question)
+		}
 	}
 }

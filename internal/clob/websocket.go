@@ -170,7 +170,7 @@ func (c *WSClient) OnUpdate(handler func(MarketUpdate)) {
 // Note: WebSocket is optional - REST polling is used as primary price source.
 func (c *WSClient) Run(ctx context.Context) error {
 	backoff := initialBackoff
-	retryCount := 0
+	failureCount := 0
 	loggedDisabled := false
 
 	for {
@@ -183,13 +183,9 @@ func (c *WSClient) Run(ctx context.Context) error {
 		}
 
 		if err := c.Connect(); err != nil {
-			retryCount++
-			// Only log first failure and when backoff increases significantly
-			if retryCount == 1 {
-				log.Printf("[ws] connection failed (using REST polling instead): %v", err)
-			} else if !loggedDisabled && retryCount > 5 {
-				log.Printf("[ws] disabled after %d failures, using REST polling only", retryCount)
-				loggedDisabled = true
+			failureCount++
+			if failureCount == 1 {
+				log.Printf("[ws] connection failed (using REST polling): %v", err)
 			}
 			if !c.sleep(ctx, backoff) {
 				return ctx.Err()
@@ -201,14 +197,9 @@ func (c *WSClient) Run(ctx context.Context) error {
 		// Resubscribe to previously subscribed markets
 		if err := c.resubscribe(); err != nil {
 			c.closeConnection()
+			failureCount++
 			continue
 		}
-
-		// Reset backoff on successful connection
-		backoff = initialBackoff
-		retryCount = 0
-		loggedDisabled = false
-		log.Printf("[ws] connected successfully")
 
 		// Run the read loop
 		err := c.readLoop(ctx)
@@ -216,7 +207,14 @@ func (c *WSClient) Run(ctx context.Context) error {
 			if errors.Is(err, context.Canceled) {
 				return err
 			}
-			// Silent reconnect - don't spam logs
+			failureCount++
+			// Only log after first successful connection that then fails
+			if failureCount == 1 {
+				log.Printf("[ws] disconnected (using REST polling): %v", err)
+			} else if !loggedDisabled && failureCount >= 3 {
+				log.Printf("[ws] unstable, disabled (REST polling only)")
+				loggedDisabled = true
+			}
 		}
 
 		c.closeConnection()
