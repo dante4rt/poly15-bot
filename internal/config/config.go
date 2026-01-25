@@ -20,6 +20,9 @@ type Config struct {
 	CLOBSecret     string
 	CLOBPassphrase string
 
+	// Proxy (optional)
+	ProxyURL string // SOCKS5 proxy: user:pass@host:port
+
 	// Telegram notifications (optional)
 	TelegramBotToken string
 	TelegramChatID   string
@@ -105,6 +108,9 @@ func Load() (*Config, error) {
 	// Optional telegram config
 	cfg.TelegramBotToken = os.Getenv("TELEGRAM_BOT_TOKEN")
 	cfg.TelegramChatID = os.Getenv("TELEGRAM_CHAT_ID")
+
+	// Optional proxy config
+	cfg.ProxyURL = os.Getenv("PROXY_URL")
 
 	return cfg, nil
 }

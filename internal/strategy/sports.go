@@ -70,8 +70,8 @@ func NewSportsSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*S
 		config:        cfg,
 		gamma:         gamma.NewClient(),
 		espn:          sports.NewESPNClient(),
-		clob:          clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase),
-		builder:       clob.NewOrderBuilder(w),
+		clob:          clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, w.AddressHex()),
+		builder:       clob.NewOrderBuilder(w, cfg.CLOBApiKey),
 		telegram:      tg,
 		activeMarkets: make(map[string]*TrackedSportsMarket),
 	}, nil

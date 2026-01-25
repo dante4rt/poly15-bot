@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -154,8 +155,22 @@ func NewBlackSwanHunter(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) 
 	}
 
 	gammaClient := gamma.NewClient()
-	clobClient := clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase)
-	builder := clob.NewOrderBuilder(w)
+
+	// Create CLOB client with optional proxy
+	var clobClient *clob.Client
+	walletAddr := w.AddressHex()
+	if cfg.ProxyURL != "" {
+		log.Printf("[blackswan] using proxy: %s", maskProxy(cfg.ProxyURL))
+		var err error
+		clobClient, err = clob.NewClientWithProxy(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, walletAddr, cfg.ProxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create CLOB client with proxy: %w", err)
+		}
+	} else {
+		clobClient = clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, walletAddr)
+	}
+
+	builder := clob.NewOrderBuilder(w, cfg.CLOBApiKey)
 
 	return &BlackSwanHunter{
 		config:   cfg,
@@ -512,8 +527,8 @@ func (h *BlackSwanHunter) CheckPositions() error {
 	openOrderMap := make(map[string]bool)
 	for _, order := range openOrders {
 		// Order struct has fields including Maker, TokenID, etc
-		// The order ID might be in a specific field - using Salt as identifier
-		openOrderMap[order.Salt] = true
+		// Using Salt converted to string as identifier
+		openOrderMap[strconv.FormatInt(order.Salt, 10)] = true
 	}
 
 	// Check our tracked positions
@@ -579,4 +594,34 @@ func (h *BlackSwanHunter) GetStats() map[string]interface{} {
 		"total_canceled": h.totalCanceled,
 		"bankroll":       h.bankroll,
 	}
+}
+
+// maskProxy masks the password in a proxy URL for logging.
+// Input: "user:pass@host:port" -> Output: "user:***@host:port"
+func maskProxy(proxyURL string) string {
+	// Find @ separator
+	atIdx := -1
+	for i, c := range proxyURL {
+		if c == '@' {
+			atIdx = i
+			break
+		}
+	}
+	if atIdx == -1 {
+		return proxyURL // No auth
+	}
+
+	// Find : in auth part
+	colonIdx := -1
+	for i, c := range proxyURL[:atIdx] {
+		if c == ':' {
+			colonIdx = i
+			break
+		}
+	}
+	if colonIdx == -1 {
+		return proxyURL // No password
+	}
+
+	return proxyURL[:colonIdx+1] + "***" + proxyURL[atIdx:]
 }

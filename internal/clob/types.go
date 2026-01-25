@@ -15,16 +15,17 @@ type PriceLevel struct {
 
 // Order represents a signed order on the CLOB.
 type Order struct {
-	ID            string `json:"id"`
+	Salt          int64  `json:"salt"`          // integer, not string
 	Maker         string `json:"maker"`
+	Signer        string `json:"signer"`
+	Taker         string `json:"taker"`
 	TokenID       string `json:"tokenId"`
 	MakerAmount   string `json:"makerAmount"`
 	TakerAmount   string `json:"takerAmount"`
-	Side          string `json:"side"` // "BUY" or "SELL"
 	Expiration    string `json:"expiration"`
 	Nonce         string `json:"nonce"`
 	FeeRateBps    string `json:"feeRateBps"`
-	Salt          string `json:"salt"`
+	Side          string `json:"side"` // "BUY" or "SELL"
 	SignatureType int    `json:"signatureType"`
 	Signature     string `json:"signature"`
 }
@@ -49,6 +50,7 @@ const (
 // OrderRequest represents a request to create a new order.
 type OrderRequest struct {
 	Order     Order  `json:"order"`
+	Owner     string `json:"owner"`     // wallet address
 	OrderType string `json:"orderType"`
 }
 

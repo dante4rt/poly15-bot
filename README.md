@@ -15,7 +15,7 @@ Two strategies for Polymarket prediction markets.
 cp .env.example .env   # Add your credentials
 make build
 make blackswan-dry     # Test Black Swan
-make run-dry           # Test 15-min sniper
+make approve           # One-time USDC approval (before live trading)
 ```
 
 ## Required Credentials
@@ -44,11 +44,11 @@ BLACKSWAN_BID_DISCOUNT=0.25 # Bid 25% below market
 
 ```bash
 make build         # Build all
-make blackswan     # Run Black Swan (live)
-make blackswan-dry # Run Black Swan (test)
-make run           # Run 15-min sniper (live)
-make run-dry       # Run 15-min sniper (test)
-make scan          # Find active markets
+make approve       # USDC approval (one-time)
+make blackswan     # Black Swan (live)
+make blackswan-dry # Black Swan (test)
+make run           # 15-min sniper (live)
+make run-dry       # 15-min sniper (test)
 ```
 
 ## Go Live

@@ -184,9 +184,9 @@ func signTransaction(tx *types.Transaction, w *wallet.Wallet, chainID *big.Int) 
 		return nil, fmt.Errorf("failed to sign: %w", err)
 	}
 
-	if signature[64] < 27 {
-		signature[64] += 27
-	}
+	// Note: Do NOT adjust V value here. The EIP-155 signer expects the raw
+	// recovery ID (0 or 1) and will compute the proper V value internally.
+	// Adding 27 would corrupt the signature.
 
 	signedTx, err := tx.WithSignature(signer, signature)
 	if err != nil {

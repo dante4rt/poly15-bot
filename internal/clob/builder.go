@@ -3,6 +3,7 @@ package clob
 import (
 	"crypto/rand"
 	"fmt"
+	"math"
 	"math/big"
 	"strconv"
 	"time"
@@ -18,32 +19,39 @@ const (
 	defaultFeeRateBps = 0
 	// Default expiration (1 hour from now)
 	defaultExpirationSeconds = 3600
+	// Tick size for prices (0.001)
+	tickSize = 0.001
+	// Price decimal precision (tick size = 10^-priceDecimals)
+	priceDecimals = 3
 )
 
 // OrderBuilder constructs and signs orders for the CLOB.
 type OrderBuilder struct {
 	signer *wallet.Signer
 	maker  common.Address
+	apiKey string // API key used as owner for orders
 	nonce  *big.Int
 }
 
-// NewOrderBuilder creates a new OrderBuilder with the given wallet.
-func NewOrderBuilder(w *wallet.Wallet) *OrderBuilder {
+// NewOrderBuilder creates a new OrderBuilder with the given wallet and API key.
+func NewOrderBuilder(w *wallet.Wallet, apiKey string) *OrderBuilder {
 	signer := wallet.NewSigner(w)
 	return &OrderBuilder{
 		signer: signer,
 		maker:  w.Address(),
+		apiKey: apiKey,
 		nonce:  big.NewInt(0),
 	}
 }
 
 // NewOrderBuilderWithConfig creates an OrderBuilder with custom chain configuration.
 // Use this for testnet deployments.
-func NewOrderBuilderWithConfig(w *wallet.Wallet, chainID int64, exchangeAddress common.Address) *OrderBuilder {
+func NewOrderBuilderWithConfig(w *wallet.Wallet, apiKey string, chainID int64, exchangeAddress common.Address) *OrderBuilder {
 	signer := wallet.NewSignerWithConfig(w, chainID, exchangeAddress)
 	return &OrderBuilder{
 		signer: signer,
 		maker:  w.Address(),
+		apiKey: apiKey,
 		nonce:  big.NewInt(0),
 	}
 }
@@ -85,33 +93,57 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 		return nil, fmt.Errorf("failed to generate salt: %w", err)
 	}
 
-	// Calculate amounts
-	// For BUY: makerAmount = USDC to spend, takerAmount = tokens to receive
-	// For SELL: makerAmount = tokens to sell, takerAmount = USDC to receive
-	var makerAmount, takerAmount *big.Int
+	// Calculate amounts using integer math to avoid float precision issues.
+	// Polymarket requirements:
+	// - Price must be at tick size (0.001) - implicit price from amounts must match
+	// - BUY orders: makerAmount (USDC) calculated from size*price, takerAmount = size (tokens)
+	// - SELL orders: makerAmount = size (tokens), takerAmount (USDC) calculated from size*price
+	// - All amounts in wei (6 decimals)
 
-	sizeWei := floatToUSDCWei(params.Size)
+	// CRITICAL: For implicit price to be at tick size, we must:
+	// 1. Round price to tick size FIRST
+	// 2. Calculate amounts based on rounded price
+	// This ensures makerAmount/takerAmount = rounded_price (at tick size)
+
+	// Round price to tick size (0.001)
+	priceRounded := roundToTickSize(params.Price)
+
+	// Convert to integer representations for precise calculation
+	// priceInt = rounded_price * 1000 (milli-units, guaranteed integer since price is at tick)
+	// sizeInt = floor(size * 100) (centi-units, 2 decimal precision)
+	priceInt := int64(math.Round(priceRounded * 1000))
+	sizeInt := int64(math.Floor(params.Size * 100))
+
+	// sizeWei = sizeInt * 10000 (convert centi-units to wei)
+	sizeWei := sizeInt * 10000
+
+	var makerAmount, takerAmount *big.Int
 
 	if params.Side == OrderSideBuy {
 		// Buying tokens: pay USDC, receive tokens
-		// makerAmount = size * price (USDC paying)
-		// takerAmount = size (tokens receiving)
-		priceWei := floatToUSDCWei(params.Size * params.Price)
-		makerAmount = priceWei
-		takerAmount = sizeWei
+		// costWei = sizeWei * priceInt / 1000
+		// This ensures costWei / sizeWei = priceInt / 1000 = priceRounded
+		costWei := (sizeWei * priceInt) / 1000
+		makerAmount = big.NewInt(costWei)
+		takerAmount = big.NewInt(sizeWei)
 	} else {
 		// Selling tokens: pay tokens, receive USDC
-		// makerAmount = size (tokens selling)
-		// takerAmount = size * price (USDC receiving)
-		makerAmount = sizeWei
-		priceWei := floatToUSDCWei(params.Size * params.Price)
-		takerAmount = priceWei
+		makerAmount = big.NewInt(sizeWei)
+		proceedsWei := (sizeWei * priceInt) / 1000
+		takerAmount = big.NewInt(proceedsWei)
 	}
 
 	// Set expiration
-	expiration := params.Expiration
-	if expiration == 0 {
-		expiration = time.Now().Unix() + defaultExpirationSeconds
+	// For GTC and FOK orders, expiration must be 0
+	// Only GTD orders use a non-zero expiration
+	var expiration int64
+	if params.OrderType == OrderTypeGTD {
+		expiration = params.Expiration
+		if expiration == 0 {
+			expiration = time.Now().Unix() + defaultExpirationSeconds
+		}
+	} else {
+		expiration = 0
 	}
 
 	// Set fee rate
@@ -150,21 +182,24 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 
 	// Convert to API order format
 	apiOrder := Order{
+		Salt:          salt.Int64(),
 		Maker:         b.maker.Hex(),
+		Signer:        b.maker.Hex(),                      // signer is same as maker for EOA
+		Taker:         common.Address{}.Hex(),             // zero address for any taker
 		TokenID:       params.TokenID,
 		MakerAmount:   makerAmount.String(),
 		TakerAmount:   takerAmount.String(),
-		Side:          string(params.Side),
 		Expiration:    strconv.FormatInt(expiration, 10),
 		Nonce:         b.nonce.String(),
 		FeeRateBps:    strconv.Itoa(feeRate),
-		Salt:          salt.String(),
+		Side:          string(params.Side),
 		SignatureType: int(wallet.SignatureTypeEOA),
 		Signature:     signature,
 	}
 
 	return &OrderRequest{
 		Order:     apiOrder,
+		Owner:     b.apiKey, // API key is used as owner
 		OrderType: string(params.OrderType),
 	}, nil
 }
@@ -216,12 +251,21 @@ func (b *OrderBuilder) BuildGTCSellOrder(tokenID string, price, size float64) (*
 }
 
 // generateSalt generates a cryptographically random salt for order uniqueness.
+// Returns a random int64 in range [0, 2^32) to match official Polymarket implementation.
 func generateSalt() (*big.Int, error) {
-	bytes := make([]byte, 32)
-	if _, err := rand.Read(bytes); err != nil {
+	// Generate random number in range [0, 2^32) as per official go-order-utils
+	maxInt := big.NewInt(1 << 32) // 2^32
+	salt, err := rand.Int(rand.Reader, maxInt)
+	if err != nil {
 		return nil, err
 	}
-	return new(big.Int).SetBytes(bytes), nil
+	return salt, nil
+}
+
+// roundToTickSize rounds a price to the nearest tick size (0.001).
+// This ensures the price is valid for Polymarket's tick size rules.
+func roundToTickSize(price float64) float64 {
+	return math.Round(price/tickSize) * tickSize
 }
 
 // floatToUSDCWei converts a float USDC amount to wei (6 decimals).
@@ -233,6 +277,13 @@ func floatToUSDCWei(amount float64) *big.Int {
 
 	wei, _ := result.Int(nil)
 	return wei
+}
+
+// truncateToDecimals truncates (rounds down) a float to the specified number of decimal places.
+// This matches Polymarket's amount calculation logic.
+func truncateToDecimals(value float64, decimals int) float64 {
+	multiplier := math.Pow(10, float64(decimals))
+	return math.Floor(value*multiplier) / multiplier
 }
 
 // sideToUint8 converts OrderSide to uint8 for signing.

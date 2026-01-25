@@ -250,9 +250,9 @@ func NewSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*Sniper,
 	}
 
 	gammaClient := gamma.NewClient()
-	clobClient := clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase)
+	clobClient := clob.NewClient(cfg.CLOBApiKey, cfg.CLOBSecret, cfg.CLOBPassphrase, w.AddressHex())
 	wsClient := clob.NewWSClient()
-	builder := clob.NewOrderBuilder(w)
+	builder := clob.NewOrderBuilder(w, cfg.CLOBApiKey)
 	binanceClient := pricefeed.NewBinanceClient()
 
 	minLiq := cfg.MinLiquidity

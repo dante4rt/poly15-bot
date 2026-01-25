@@ -9,16 +9,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
+
+	"golang.org/x/net/proxy"
 )
 
 const (
 	baseURL            = "https://clob.polymarket.com"
-	headerAPIKey       = "POLY-API-KEY"
-	headerSignature    = "POLY-SIGNATURE"
-	headerTimestamp    = "POLY-TIMESTAMP"
-	headerPassphrase   = "POLY-PASSPHRASE"
+	headerAPIKey       = "POLY_API_KEY"
+	headerSignature    = "POLY_SIGNATURE"
+	headerTimestamp    = "POLY_TIMESTAMP"
+	headerPassphrase   = "POLY_PASSPHRASE"
+	headerAddress      = "POLY_ADDRESS"
 	defaultTimeout     = 30 * time.Second
 )
 
@@ -27,21 +31,67 @@ type Client struct {
 	apiKey     string
 	secret     string
 	passphrase string
+	address    string // wallet address
 	httpClient *http.Client
 	baseURL    string
 }
 
 // NewClient creates a new CLOB API client.
-func NewClient(apiKey, secret, passphrase string) *Client {
+func NewClient(apiKey, secret, passphrase, address string) *Client {
 	return &Client{
 		apiKey:     apiKey,
 		secret:     secret,
 		passphrase: passphrase,
+		address:    address,
 		httpClient: &http.Client{
 			Timeout: defaultTimeout,
 		},
 		baseURL: baseURL,
 	}
+}
+
+// NewClientWithProxy creates a new CLOB API client with SOCKS5 proxy support.
+// proxyURL format: "host:port" or "user:pass@host:port"
+func NewClientWithProxy(apiKey, secret, passphrase, address, proxyURL string) (*Client, error) {
+	// Parse proxy URL
+	var auth *proxy.Auth
+	var addr string
+
+	// Check if proxy has auth (user:pass@host:port)
+	if u, err := url.Parse("socks5://" + proxyURL); err == nil && u.User != nil {
+		auth = &proxy.Auth{
+			User: u.User.Username(),
+		}
+		if pass, ok := u.User.Password(); ok {
+			auth.Password = pass
+		}
+		addr = u.Host
+	} else {
+		addr = proxyURL
+	}
+
+	// Create SOCKS5 dialer
+	dialer, err := proxy.SOCKS5("tcp", addr, auth, proxy.Direct)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
+	}
+
+	// Create HTTP transport with SOCKS5 dialer
+	transport := &http.Transport{
+		Dial: dialer.Dial,
+	}
+
+	return &Client{
+		apiKey:     apiKey,
+		secret:     secret,
+		passphrase: passphrase,
+		address:    address,
+		httpClient: &http.Client{
+			Timeout:   defaultTimeout,
+			Transport: transport,
+		},
+		baseURL: baseURL,
+	}, nil
 }
 
 // WithHTTPClient sets a custom HTTP client.
@@ -91,13 +141,16 @@ func (c *Client) CreateOrder(order *OrderRequest) (*OrderResponse, error) {
 	}
 	defer resp.Body.Close()
 
+	// Debug: read and log response
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return nil, c.parseError(resp)
+		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// Re-parse the body we already read
 	var orderResp OrderResponse
-	if err := json.NewDecoder(resp.Body).Decode(&orderResp); err != nil {
-		return nil, fmt.Errorf("failed to decode order response: %w", err)
+	if err := json.Unmarshal(respBody, &orderResp); err != nil {
+		return nil, fmt.Errorf("failed to decode order response: %w (body: %s)", err, string(respBody))
 	}
 
 	return &orderResp, nil
@@ -165,11 +218,13 @@ func (c *Client) doRequest(method, path string, body []byte) (*http.Response, er
 	req.Header.Set(headerSignature, signature)
 	req.Header.Set(headerTimestamp, timestamp)
 	req.Header.Set(headerPassphrase, c.passphrase)
+	req.Header.Set(headerAddress, c.address)
 
 	return c.httpClient.Do(req)
 }
 
 // sign generates the HMAC-SHA256 signature for a request.
+// Uses URL-safe base64 encoding per Polymarket CLOB spec.
 func (c *Client) sign(timestamp, method, path string, body []byte) string {
 	var bodyStr string
 	if body != nil {
@@ -178,10 +233,22 @@ func (c *Client) sign(timestamp, method, path string, body []byte) string {
 
 	message := timestamp + method + path + bodyStr
 
-	h := hmac.New(sha256.New, []byte(c.secret))
+	// Secret is URL-safe base64 encoded, decode it first
+	secretBytes, err := base64.URLEncoding.DecodeString(c.secret)
+	if err != nil {
+		// Try standard base64 as fallback
+		secretBytes, err = base64.StdEncoding.DecodeString(c.secret)
+		if err != nil {
+			// Fallback to raw secret
+			secretBytes = []byte(c.secret)
+		}
+	}
+
+	h := hmac.New(sha256.New, secretBytes)
 	h.Write([]byte(message))
 
-	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+	// Return URL-safe base64 encoded signature
+	return base64.URLEncoding.EncodeToString(h.Sum(nil))
 }
 
 // parseError extracts error information from a failed response.

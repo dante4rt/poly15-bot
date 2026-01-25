@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
@@ -36,13 +37,44 @@ var (
 	ErrInvalidOrder = errors.New("invalid order parameters")
 
 	// EIP-712 type hashes (pre-computed for gas efficiency)
+	// IMPORTANT: Domain includes "string version" per official Polymarket go-order-utils
 	eip712DomainTypeHash = crypto.Keccak256Hash(
-		[]byte("EIP712Domain(string name,uint256 chainId,address verifyingContract)"),
+		[]byte("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)"),
 	)
+
+	// Protocol name and version hashes (pre-computed)
+	protocolNameHash    = crypto.Keccak256Hash([]byte("Polymarket CTF Exchange"))
+	protocolVersionHash = crypto.Keccak256Hash([]byte("1"))
 
 	orderTypeHash = crypto.Keccak256Hash(
 		[]byte("Order(uint256 salt,address maker,address signer,address taker,uint256 tokenId,uint256 makerAmount,uint256 takerAmount,uint256 expiration,uint256 nonce,uint256 feeRateBps,uint8 side,uint8 signatureType)"),
 	)
+
+	// ABI types for encoding (matching official go-order-utils)
+	bytes32Type, _ = abi.NewType("bytes32", "", nil)
+	uint256Type, _ = abi.NewType("uint256", "", nil)
+	addressType, _ = abi.NewType("address", "", nil)
+	uint8Type, _   = abi.NewType("uint8", "", nil)
+
+	// Domain separator ABI structure
+	domainABITypes = []abi.Type{bytes32Type, bytes32Type, bytes32Type, uint256Type, addressType}
+
+	// Order ABI structure
+	orderABITypes = []abi.Type{
+		bytes32Type, // type hash
+		uint256Type, // salt
+		addressType, // maker
+		addressType, // signer
+		addressType, // taker
+		uint256Type, // tokenId
+		uint256Type, // makerAmount
+		uint256Type, // takerAmount
+		uint256Type, // expiration
+		uint256Type, // nonce
+		uint256Type, // feeRateBps
+		uint8Type,   // side
+		uint8Type,   // signatureType
+	}
 )
 
 // Order represents a Polymarket CLOB order for EIP-712 signing.
@@ -154,35 +186,82 @@ func (s *Signer) Wallet() *Wallet {
 	return s.wallet
 }
 
-// computeDomainSeparator calculates the EIP-712 domain separator.
+// computeDomainSeparator calculates the EIP-712 domain separator using ABI encoding.
+// Uses pre-computed name and version hashes per official Polymarket implementation.
 func computeDomainSeparator(name string, chainID *big.Int, verifyingContract common.Address) common.Hash {
-	nameHash := crypto.Keccak256Hash([]byte(name))
+	// ABI encode the domain values
+	values := []interface{}{
+		eip712DomainTypeHash,
+		protocolNameHash,
+		protocolVersionHash,
+		chainID,
+		verifyingContract,
+	}
 
-	return crypto.Keccak256Hash(
-		eip712DomainTypeHash.Bytes(),
-		nameHash.Bytes(),
-		padTo32Bytes(chainID),
-		padAddress(verifyingContract),
-	)
+	encoded, err := abiEncode(domainABITypes, values)
+	if err != nil {
+		// Fallback to manual encoding if ABI encoding fails
+		return crypto.Keccak256Hash(
+			eip712DomainTypeHash.Bytes(),
+			protocolNameHash.Bytes(),
+			protocolVersionHash.Bytes(),
+			padTo32Bytes(chainID),
+			padAddress(verifyingContract),
+		)
+	}
+
+	return crypto.Keccak256Hash(encoded)
 }
 
-// hashOrder computes the EIP-712 struct hash for an Order.
+// hashOrder computes the EIP-712 struct hash for an Order using ABI encoding.
 func hashOrder(order *Order) common.Hash {
-	return crypto.Keccak256Hash(
-		orderTypeHash.Bytes(),
-		padTo32Bytes(order.Salt),
-		padAddress(order.Maker),
-		padAddress(order.Signer),
-		padAddress(order.Taker),
-		padTo32Bytes(order.TokenID),
-		padTo32Bytes(order.MakerAmount),
-		padTo32Bytes(order.TakerAmount),
-		padTo32Bytes(order.Expiration),
-		padTo32Bytes(order.Nonce),
-		padTo32Bytes(order.FeeRateBps),
-		padUint8(order.Side),
-		padUint8(order.SignatureType),
-	)
+	// ABI encode the order values (matching official go-order-utils)
+	values := []interface{}{
+		orderTypeHash,
+		order.Salt,
+		order.Maker,
+		order.Signer,
+		order.Taker,
+		order.TokenID,
+		order.MakerAmount,
+		order.TakerAmount,
+		order.Expiration,
+		order.Nonce,
+		order.FeeRateBps,
+		order.Side,
+		order.SignatureType,
+	}
+
+	encoded, err := abiEncode(orderABITypes, values)
+	if err != nil {
+		// Fallback to manual encoding if ABI encoding fails
+		return crypto.Keccak256Hash(
+			orderTypeHash.Bytes(),
+			padTo32Bytes(order.Salt),
+			padAddress(order.Maker),
+			padAddress(order.Signer),
+			padAddress(order.Taker),
+			padTo32Bytes(order.TokenID),
+			padTo32Bytes(order.MakerAmount),
+			padTo32Bytes(order.TakerAmount),
+			padTo32Bytes(order.Expiration),
+			padTo32Bytes(order.Nonce),
+			padTo32Bytes(order.FeeRateBps),
+			padUint8(order.Side),
+			padUint8(order.SignatureType),
+		)
+	}
+
+	return crypto.Keccak256Hash(encoded)
+}
+
+// abiEncode encodes values using the Ethereum ABI encoder.
+func abiEncode(types []abi.Type, values []interface{}) ([]byte, error) {
+	arguments := make(abi.Arguments, len(types))
+	for i, t := range types {
+		arguments[i] = abi.Argument{Type: t}
+	}
+	return arguments.Pack(values...)
 }
 
 // computeEIP712Digest computes the final EIP-712 digest.
