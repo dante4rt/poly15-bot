@@ -50,35 +50,50 @@ func NewClient(apiKey, secret, passphrase, address string) *Client {
 	}
 }
 
-// NewClientWithProxy creates a new CLOB API client with SOCKS5 proxy support.
-// proxyURL format: "host:port" or "user:pass@host:port"
+// NewClientWithProxy creates a new CLOB API client with HTTP or SOCKS5 proxy support.
+// proxyURL format: "user:pass@host:port" (defaults to HTTP proxy)
+// For SOCKS5: prefix with "socks5://" e.g. "socks5://user:pass@host:port"
 func NewClientWithProxy(apiKey, secret, passphrase, address, proxyURL string) (*Client, error) {
-	// Parse proxy URL
-	var auth *proxy.Auth
-	var addr string
+	var transport *http.Transport
 
-	// Check if proxy has auth (user:pass@host:port)
-	if u, err := url.Parse("socks5://" + proxyURL); err == nil && u.User != nil {
-		auth = &proxy.Auth{
-			User: u.User.Username(),
+	// Check if it's explicitly a SOCKS5 proxy
+	if len(proxyURL) > 9 && proxyURL[:9] == "socks5://" {
+		// SOCKS5 proxy
+		proxyURL = proxyURL[9:] // Remove socks5:// prefix
+
+		var auth *proxy.Auth
+		var addr string
+
+		if u, err := url.Parse("socks5://" + proxyURL); err == nil && u.User != nil {
+			auth = &proxy.Auth{
+				User: u.User.Username(),
+			}
+			if pass, ok := u.User.Password(); ok {
+				auth.Password = pass
+			}
+			addr = u.Host
+		} else {
+			addr = proxyURL
 		}
-		if pass, ok := u.User.Password(); ok {
-			auth.Password = pass
+
+		dialer, err := proxy.SOCKS5("tcp", addr, auth, proxy.Direct)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
 		}
-		addr = u.Host
+
+		transport = &http.Transport{
+			Dial: dialer.Dial,
+		}
 	} else {
-		addr = proxyURL
-	}
+		// HTTP/HTTPS proxy (default)
+		proxyURLParsed, err := url.Parse("http://" + proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse proxy URL: %w", err)
+		}
 
-	// Create SOCKS5 dialer
-	dialer, err := proxy.SOCKS5("tcp", addr, auth, proxy.Direct)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
-	}
-
-	// Create HTTP transport with SOCKS5 dialer
-	transport := &http.Transport{
-		Dial: dialer.Dial,
+		transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURLParsed),
+		}
 	}
 
 	return &Client{
