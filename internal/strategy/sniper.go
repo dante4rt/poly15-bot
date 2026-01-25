@@ -21,7 +21,7 @@ const (
 	cleanupInterval = 1 * time.Minute
 
 	// Winner detection thresholds
-	minWinnerConfidence = 0.65  // Minimum bid price to consider a clear winner
+	minWinnerConfidence = 0.50  // Minimum price to consider a clear winner (per strategy: >50%)
 	maxUncertaintyGap   = 0.10  // If YES and NO bids are within this range, too risky
 	maxSpreadPercent    = 0.05  // Maximum spread as percentage of price (5%)
 	defaultMinLiquidity = 5.0   // Default minimum size in USD at best ask
@@ -43,6 +43,7 @@ const (
 	SkipReasonPriceTooHigh   SkipReason = "price_above_threshold"
 	SkipReasonMaxLossExceeds SkipReason = "max_loss_exceeded"
 	SkipReasonDailyLimit     SkipReason = "daily_loss_limit"
+	SkipReasonDownNoLiq      SkipReason = "down_no_liquidity"
 )
 
 // PriceSnapshot holds price data at a point in time for momentum tracking.
@@ -625,6 +626,15 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 		winnerAsk = yesAsk
 		winnerSize = yesSize
 	} else {
+		// DOWN is winning, but DOWN tokens typically have no liquidity (ask=0.99)
+		// Market makers only provide liquidity on UP side
+		// Skip if DOWN ask is >= 0.95 (indicates no real liquidity)
+		if noAsk >= 0.95 {
+			analysis.Side = "DOWN"
+			analysis.SkipReason = SkipReasonDownNoLiq
+			analysis.SkipDescription = fmt.Sprintf("DOWN winning but no liquidity (ask=%.4f), only UP side tradeable", noAsk)
+			return analysis
+		}
 		analysis.Side = "DOWN"
 		analysis.TokenID = tracked.NoTokenID
 		winnerGammaPrice = gammaNo
@@ -943,7 +953,7 @@ func (s *Sniper) logStatus() {
 			}
 			log.Printf("[status] %s - ends in %v", tracked.Market.Question, timeRemaining.Truncate(time.Second))
 			log.Printf("[status]   gamma: UP=%.1f%% DOWN=%.1f%% => likely %s", gammaYes*100, gammaNo*100, winner)
-			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade)", prob*100, minWinnerConfidence*100)
+			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade, UP side only)", prob*100, minWinnerConfidence*100)
 		} else {
 			log.Printf("[status] %s - ENDED (cleanup pending)", tracked.Market.Question)
 		}
