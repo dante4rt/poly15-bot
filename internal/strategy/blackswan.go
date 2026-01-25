@@ -325,7 +325,6 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 	}
 
 	var candidates []BlackSwanCandidate
-	skippedInactive := 0
 	skippedVolume := 0
 
 	for _, market := range markets {
@@ -334,20 +333,22 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 			continue
 		}
 
-		// IMPORTANT: Skip markets with no recent activity (dead markets)
-		// Must have activity within last 30 days
-		if !market.HasRecentActivity(30 * 24 * time.Hour) {
-			skippedInactive++
-			continue
-		}
+		// CRITICAL: Use 24hr volume to filter for ACTUALLY ACTIVE markets
+		// This is the key metric - total volume can be old, 24hr shows recent activity
+		volume24hr := market.GetVolume24hr()
 
-		// Check volume is within configured range
-		volume := market.GetVolume()
-		if h.config.BlackSwanMinVolume > 0 && volume < h.config.BlackSwanMinVolume {
+		// Must have minimum 24hr volume (default $1000 for trending markets)
+		minVol := h.config.BlackSwanMinVolume
+		if minVol < 1000 {
+			minVol = 1000 // Override low values - we want trending markets
+		}
+		if volume24hr < minVol {
 			skippedVolume++
 			continue
 		}
-		if h.config.BlackSwanMaxVolume > 0 && volume > h.config.BlackSwanMaxVolume {
+
+		// Skip markets with too much volume (probably too efficient)
+		if h.config.BlackSwanMaxVolume > 0 && volume24hr > h.config.BlackSwanMaxVolume {
 			continue
 		}
 
@@ -362,7 +363,7 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 		if h.isBlackSwanCandidate(yesToken.Price, noToken.Price) {
 			candidate := h.buildCandidate(market, yesToken, noToken)
 			if candidate != nil {
-				candidate.Volume = volume
+				candidate.Volume = volume24hr
 				candidates = append(candidates, *candidate)
 			}
 		}
@@ -371,14 +372,14 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 		if h.isBlackSwanCandidate(noToken.Price, yesToken.Price) {
 			candidate := h.buildCandidateNo(market, noToken, yesToken)
 			if candidate != nil {
-				candidate.Volume = volume
+				candidate.Volume = volume24hr
 				candidates = append(candidates, *candidate)
 			}
 		}
 	}
 
-	if skippedInactive > 0 || skippedVolume > 0 {
-		log.Printf("[blackswan] filtered out: %d inactive (no activity 30d), %d low volume", skippedInactive, skippedVolume)
+	if skippedVolume > 0 {
+		log.Printf("[blackswan] filtered out: %d markets with <$1000 24hr volume", skippedVolume)
 	}
 
 	return candidates, nil
@@ -416,11 +417,11 @@ func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken 
 	// Score the opportunity:
 	// - Lower price = better payout potential
 	// - Higher opposite confidence = more mispriced
-	// - Higher volume = more likely to fill (log scale to avoid dominating)
-	volume := market.GetVolume()
+	// - Higher 24hr volume = more likely to fill and more active market
+	volume24hr := market.GetVolume24hr()
 	volumeBonus := 1.0
-	if volume > 100 {
-		volumeBonus = 1.0 + (volume / 10000) // Bonus up to ~2x for high volume
+	if volume24hr > 1000 {
+		volumeBonus = 1.0 + (volume24hr / 50000) // Bonus for high volume
 		if volumeBonus > 2.0 {
 			volumeBonus = 2.0
 		}
@@ -434,7 +435,7 @@ func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken 
 		CurrentPrice:  yesToken.Price,
 		BidPrice:      bidPrice,
 		Score:         score,
-		Volume:        volume,
+		Volume:        volume24hr,
 		EndTime:       endTime,
 		OverConfident: noToken.Price >= 0.90,
 	}
@@ -452,11 +453,11 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 		bidPrice = h.config.BlackSwanMinPrice
 	}
 
-	// Score with volume bonus
-	volume := market.GetVolume()
+	// Score with 24hr volume bonus
+	volume24hr := market.GetVolume24hr()
 	volumeBonus := 1.0
-	if volume > 100 {
-		volumeBonus = 1.0 + (volume / 10000)
+	if volume24hr > 1000 {
+		volumeBonus = 1.0 + (volume24hr / 50000)
 		if volumeBonus > 2.0 {
 			volumeBonus = 2.0
 		}
@@ -470,7 +471,7 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 		CurrentPrice:  noToken.Price,
 		BidPrice:      bidPrice,
 		Score:         score,
-		Volume:        volume,
+		Volume:        volume24hr,
 		EndTime:       endTime,
 		OverConfident: yesToken.Price >= 0.90,
 	}

@@ -212,20 +212,25 @@ type SearchParams struct {
 	Order   string // "asc" or "desc"
 }
 
-// GetVolume returns the best available volume metric.
+// GetVolume returns the total volume.
 func (m *Market) GetVolume() float64 {
-	// Prefer 24hr volume, then total volume
+	if v, err := m.VolumeNum.Float64(); err == nil && v > 0 {
+		return v
+	}
+	v, _ := m.Volume.Float64()
+	return v
+}
+
+// GetVolume24hr returns specifically the 24-hour trading volume.
+// This is the key metric for determining if a market is actively traded.
+func (m *Market) GetVolume24hr() float64 {
 	if v, err := m.Volume24hr.Float64(); err == nil && v > 0 {
 		return v
 	}
 	if v, err := m.Volume24hrClob.Float64(); err == nil && v > 0 {
 		return v
 	}
-	if v, err := m.VolumeNum.Float64(); err == nil && v > 0 {
-		return v
-	}
-	v, _ := m.Volume.Float64()
-	return v
+	return 0
 }
 
 // GetLiquidity returns the market liquidity.
