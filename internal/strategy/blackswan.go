@@ -572,8 +572,26 @@ func (h *BlackSwanHunter) CheckPositions() error {
 		if !openOrderMap[pos.OrderID] {
 			// Order was filled or cancelled
 			log.Printf("[blackswan] order %s no longer open (was: %s)", pos.OrderID, pos.MarketTitle)
+
+			// Send Telegram notification for filled order
+			if h.telegram != nil {
+				potentialPayout := pos.Size * 1.0 // Each share pays $1 if wins
+				potentialProfit := potentialPayout - (pos.Size * pos.BidPrice)
+				msg := fmt.Sprintf("Order Filled!\n\n"+
+					"%s\n\n"+
+					"You own: %.0f %s shares\n"+
+					"Cost: $%.2f\n"+
+					"Payout if wins: $%.2f",
+					pos.MarketTitle,
+					pos.Size, pos.Outcome,
+					pos.Size*pos.BidPrice,
+					potentialPayout)
+				h.telegram.SendMessage(msg)
+				log.Printf("[blackswan] potential profit if wins: $%.2f", potentialProfit)
+			}
+
 			h.tracker.Remove(pos.OrderID)
-			h.totalFilled++ // Assume filled for now
+			h.totalFilled++
 			continue
 		}
 
