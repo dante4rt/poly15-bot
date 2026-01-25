@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"sort"
-	"strconv"
 	"sync"
 	"time"
 
@@ -558,9 +557,18 @@ func (h *BlackSwanHunter) CheckPositions() error {
 	// Build map of open order IDs
 	openOrderMap := make(map[string]bool)
 	for _, order := range openOrders {
-		// Order struct has fields including Maker, TokenID, etc
-		// Using Salt converted to string as identifier
-		openOrderMap[strconv.FormatInt(order.Salt, 10)] = true
+		orderID := order.GetID()
+		if orderID != "" {
+			openOrderMap[orderID] = true
+		}
+	}
+
+	// Debug: log what we got from API vs what we're tracking
+	if len(openOrders) > 0 || len(h.tracker.GetAll()) > 0 {
+		log.Printf("[blackswan] API returned %d orders, tracking %d positions", len(openOrders), len(h.tracker.GetAll()))
+		for _, order := range openOrders {
+			log.Printf("[blackswan] API order: id=%s hash=%s orderHash=%s salt=%d", order.ID, order.Hash, order.OrderHash, order.Salt)
+		}
 	}
 
 	// Check our tracked positions

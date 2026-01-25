@@ -15,6 +15,13 @@ type PriceLevel struct {
 
 // Order represents a signed order on the CLOB.
 type Order struct {
+	// Order identification - API may return in different fields
+	ID            string `json:"id,omitempty"`
+	OrderID       string `json:"order_id,omitempty"`
+	Hash          string `json:"hash,omitempty"`
+	OrderHash     string `json:"orderHash,omitempty"`
+
+	// Order details
 	Salt          int64  `json:"salt"`          // integer, not string
 	Maker         string `json:"maker"`
 	Signer        string `json:"signer"`
@@ -28,6 +35,23 @@ type Order struct {
 	Side          string `json:"side"` // "BUY" or "SELL"
 	SignatureType int    `json:"signatureType"`
 	Signature     string `json:"signature"`
+}
+
+// GetID returns the order ID from whichever field contains it.
+func (o *Order) GetID() string {
+	if o.ID != "" {
+		return o.ID
+	}
+	if o.OrderID != "" {
+		return o.OrderID
+	}
+	if o.Hash != "" {
+		return o.Hash
+	}
+	if o.OrderHash != "" {
+		return o.OrderHash
+	}
+	return ""
 }
 
 // OrderSide represents the side of an order.
