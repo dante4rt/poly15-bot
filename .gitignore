@@ -1,0 +1,23 @@
+# Binaries
+bin/
+*.exe
+
+# Environment
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Go
+vendor/
+go.sum
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log

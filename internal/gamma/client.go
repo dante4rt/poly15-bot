@@ -1,0 +1,196 @@
+package gamma
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/url"
+	"strconv"
+	"strings"
+	"time"
+)
+
+const (
+	baseURL            = "https://gamma-api.polymarket.com"
+	defaultTimeout     = 30 * time.Second
+	defaultLimit       = 100
+	upDownWindowMinutes = 20
+)
+
+// Client handles communication with the Gamma API.
+type Client struct {
+	httpClient *http.Client
+	baseURL    string
+}
+
+// NewClient creates a new Gamma API client with default settings.
+func NewClient() *Client {
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: defaultTimeout,
+		},
+		baseURL: baseURL,
+	}
+}
+
+// NewClientWithTimeout creates a new Gamma API client with custom timeout.
+func NewClientWithTimeout(timeout time.Duration) *Client {
+	return &Client{
+		httpClient: &http.Client{
+			Timeout: timeout,
+		},
+		baseURL: baseURL,
+	}
+}
+
+// SearchMarkets queries the Gamma API for markets matching the given query.
+func (c *Client) SearchMarkets(query string) ([]Market, error) {
+	params := url.Values{}
+	params.Set("_q", query)
+	params.Set("active", "true")
+	params.Set("closed", "false")
+	params.Set("_limit", strconv.Itoa(defaultLimit))
+
+	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, params.Encode())
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch markets: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var markets []Market
+	if err := json.NewDecoder(resp.Body).Decode(&markets); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return markets, nil
+}
+
+// GetActiveUpDownMarkets retrieves active 15-minute BTC/ETH up-or-down markets
+// expiring within the next 20 minutes.
+func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
+	queries := []string{
+		"Bitcoin Up or Down",
+		"Ethereum Up or Down",
+		"Bitcoin 15-min",
+		"Ethereum 15-min",
+		"BTC Up or Down",
+		"ETH Up or Down",
+	}
+
+	marketMap := make(map[string]Market)
+
+	for _, query := range queries {
+		markets, err := c.SearchMarkets(query)
+		if err != nil {
+			continue
+		}
+
+		for _, market := range markets {
+			if c.isValidUpDownMarket(market) {
+				marketMap[market.ConditionID] = market
+			}
+		}
+	}
+
+	result := make([]Market, 0, len(marketMap))
+	for _, market := range marketMap {
+		result = append(result, market)
+	}
+
+	return result, nil
+}
+
+// isValidUpDownMarket checks if a market meets the criteria for 15-min trading.
+func (c *Client) isValidUpDownMarket(market Market) bool {
+	if !market.Active || market.Closed {
+		return false
+	}
+
+	question := strings.ToLower(market.Question)
+	hasAsset := strings.Contains(question, "bitcoin") ||
+		strings.Contains(question, "ethereum") ||
+		strings.Contains(question, "btc") ||
+		strings.Contains(question, "eth")
+
+	hasMarketType := strings.Contains(question, "up or down") ||
+		strings.Contains(question, "15-min") ||
+		strings.Contains(question, "15 min")
+
+	if !hasAsset || !hasMarketType {
+		return false
+	}
+
+	return market.IsExpiringSoon(upDownWindowMinutes * time.Minute)
+}
+
+// SearchMarketsWithParams queries the Gamma API with custom parameters.
+func (c *Client) SearchMarketsWithParams(params SearchParams) ([]Market, error) {
+	queryParams := url.Values{}
+
+	if params.Query != "" {
+		queryParams.Set("_q", params.Query)
+	}
+	queryParams.Set("active", strconv.FormatBool(params.Active))
+	queryParams.Set("closed", strconv.FormatBool(params.Closed))
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = defaultLimit
+	}
+	queryParams.Set("_limit", strconv.Itoa(limit))
+
+	if params.Offset > 0 {
+		queryParams.Set("_offset", strconv.Itoa(params.Offset))
+	}
+
+	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, queryParams.Encode())
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch markets: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var markets []Market
+	if err := json.NewDecoder(resp.Body).Decode(&markets); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return markets, nil
+}
+
+// GetMarketByConditionID fetches a specific market by its condition ID.
+func (c *Client) GetMarketByConditionID(conditionID string) (*Market, error) {
+	endpoint := fmt.Sprintf("%s/markets/%s", c.baseURL, url.PathEscape(conditionID))
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch market: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("market not found: %s", conditionID)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var market Market
+	if err := json.NewDecoder(resp.Body).Decode(&market); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	return &market, nil
+}

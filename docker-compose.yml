@@ -1,0 +1,48 @@
+services:
+  sniper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polymarket-sniper
+    env_file:
+      - .env
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "sniper"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+  scanner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polymarket-scanner
+    env_file:
+      - .env
+    entrypoint: ["/app/scanner"]
+    restart: "no"
+    profiles:
+      - tools
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+
+  approve:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: polymarket-approve
+    env_file:
+      - .env
+    entrypoint: ["/app/approve"]
+    restart: "no"
+    profiles:
+      - tools
+    security_opt:
+      - no-new-privileges:true
+    read_only: true

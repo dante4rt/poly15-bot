@@ -1,0 +1,31 @@
+# Git
+.git
+.gitignore
+
+# Environment files (secrets)
+.env
+*.env
+
+# Build artifacts
+bin/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Documentation
+*.md
+LICENSE
+
+# Docker
+Dockerfile*
+docker-compose*
+
+# Misc
+.DS_Store
