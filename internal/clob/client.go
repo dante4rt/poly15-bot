@@ -278,6 +278,13 @@ func (c *Client) GetOpenOrders() ([]Order, error) {
 		return nil, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	// Debug: log raw response (first 500 chars)
+	logBody := string(respBody)
+	if len(logBody) > 500 {
+		logBody = logBody[:500] + "..."
+	}
+	log.Printf("[clob] GetOpenOrders raw response: %s", logBody)
+
 	// API returns object wrapper: {"orders": [...]}
 	var response OpenOrdersResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
