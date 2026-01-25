@@ -179,9 +179,12 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 	}
 
 	// Determine signature type based on wallet mode
+	// Type 0 (EOA): Direct wallet
+	// Type 1 (Poly): Polymarket proxy wallet (created via UI deposit)
+	// Type 2 (PolyGnosis): Gnosis Safe multisig (rare)
 	var sigType uint8
 	if b.useProxyWallet {
-		sigType = wallet.SignatureTypePolyGnosis
+		sigType = wallet.SignatureTypePoly // Use type 1 for Polymarket proxy wallets
 	} else {
 		sigType = wallet.SignatureTypeEOA
 	}
