@@ -45,11 +45,15 @@ Run `make balance` to check balances and positions.
 ```env
 MAX_POSITION_SIZE=15        # Bankroll ($)
 BLACKSWAN_MAX_PRICE=0.10    # Max 10¢
+BLACKSWAN_MIN_PRICE=0.001   # Min 0.1¢ (extreme black swans)
 BLACKSWAN_BET_PERCENT=0.05  # 5% per bet
 BLACKSWAN_MAX_POSITIONS=10  # Max open orders
 BLACKSWAN_MAX_EXPOSURE=10   # Max $ at risk
 BLACKSWAN_BID_DISCOUNT=0.25 # Bid 25% below market
+BLACKSWAN_MAX_DAYS=30       # Max days to resolution (fast turnover)
 ```
+
+Strategy finds trending markets ($1000+ 24hr volume) resolving within 30 days where one side is priced 0.1¢-10¢. Places limit orders 25% below market for potential 10x-1000x returns.
 
 ## Commands
 

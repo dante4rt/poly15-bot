@@ -98,8 +98,8 @@ func main() {
 
 	fmt.Println(strings.Repeat("-", 60))
 	log.Println("starting black swan hunter...")
-	log.Println("strategy: buy low-probability events (0.1¢-5¢) with limit orders")
-	log.Println("looking for: overconfident markets (>90% on one side)")
+	log.Println("strategy: buy low-probability events with limit orders")
+	log.Println("looking for: overconfident markets resolving soon (fast capital turnover)")
 	fmt.Println(strings.Repeat("-", 60))
 
 	// Send startup notification

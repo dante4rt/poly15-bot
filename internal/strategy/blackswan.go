@@ -212,8 +212,8 @@ func (h *BlackSwanHunter) Run(ctx context.Context) error {
 		h.config.BlackSwanMinPrice, h.config.BlackSwanMinPrice*100)
 	log.Printf("[blackswan] config: bet_percent=%.1f%%, max_positions=%d, max_exposure=$%.2f",
 		h.config.BlackSwanBetPercent*100, h.config.BlackSwanMaxPositions, h.config.BlackSwanMaxExposure)
-	log.Printf("[blackswan] config: bid_discount=%.0f%%, volume_range=$%.0f-$%.0f",
-		h.config.BlackSwanBidDiscount*100, h.config.BlackSwanMinVolume, h.config.BlackSwanMaxVolume)
+	log.Printf("[blackswan] config: bid_discount=%.0f%%, min_volume=$%.0f, max_days=%d",
+		h.config.BlackSwanBidDiscount*100, h.config.BlackSwanMinVolume, h.config.BlackSwanMaxDays)
 	log.Printf("[blackswan] bankroll: $%.2f", h.bankroll)
 
 	// Initial scan
@@ -310,13 +310,25 @@ func (h *BlackSwanHunter) ScanAndBet() error {
 
 // FindCandidates searches for markets matching Black Swan criteria.
 func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
+	// Calculate date range: from now to maxDays in future
+	now := time.Now()
+	maxDays := h.config.BlackSwanMaxDays
+	if maxDays <= 0 {
+		maxDays = 30
+	}
+	endDateMin := now.Format(time.RFC3339)
+	endDateMax := now.Add(time.Duration(maxDays) * 24 * time.Hour).Format(time.RFC3339)
+
 	// Fetch markets sorted by 24hr volume (most active first)
+	// Using API-level date filtering to only get markets ending within our time window
 	params := gamma.SearchParams{
-		Active:  true,
-		Closed:  false,
-		Limit:   500,
-		OrderBy: "volume24hr",
-		Order:   "DESC",
+		Active:     true,
+		Closed:     false,
+		Limit:      500,
+		OrderBy:    "volume24hr",
+		Order:      "DESC",
+		EndDateMin: endDateMin,
+		EndDateMax: endDateMax,
 	}
 
 	markets, err := h.gamma.SearchMarketsWithParams(params)
@@ -326,38 +338,27 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 
 	var candidates []BlackSwanCandidate
 	skippedVolume := 0
-	skippedEnded := 0
 
-	now := time.Now()
+	log.Printf("[blackswan] searching %d markets ending within %d days", len(markets), maxDays)
+
 	for _, market := range markets {
 		// Skip 15-min markets (use sniper for those)
 		if market.Is15MinMarket() {
 			continue
 		}
 
-		// Skip markets that have already ended
-		endTime, _ := market.EndTime()
-		if !endTime.IsZero() && endTime.Before(now) {
-			skippedEnded++
-			continue
-		}
-
-		// CRITICAL: Use 24hr volume to filter for ACTUALLY ACTIVE markets
-		// This is the key metric - total volume can be old, 24hr shows recent activity
+		// Use 24hr volume to filter for actually active markets
 		volume24hr := market.GetVolume24hr()
 
 		// Must have minimum 24hr volume (default $1000 for trending markets)
 		minVol := h.config.BlackSwanMinVolume
 		if minVol < 1000 {
-			minVol = 1000 // Override low values - we want trending markets
+			minVol = 1000
 		}
 		if volume24hr < minVol {
 			skippedVolume++
 			continue
 		}
-
-		// NOTE: Removed max volume filter - high volume markets can still have black swan outcomes
-		// Example: Government shutdown at $6M volume can still have 1% YES outcomes worth betting on
 
 		// Get tokens and prices
 		yesToken := market.GetYesToken()
@@ -385,8 +386,8 @@ func (h *BlackSwanHunter) FindCandidates() ([]BlackSwanCandidate, error) {
 		}
 	}
 
-	if skippedEnded > 0 || skippedVolume > 0 {
-		log.Printf("[blackswan] filtered: %d already ended, %d low volume (<$1000 24hr)", skippedEnded, skippedVolume)
+	if skippedVolume > 0 {
+		log.Printf("[blackswan] filtered: %d low volume (<$1000)", skippedVolume)
 	}
 
 	return candidates, nil
@@ -436,16 +437,28 @@ func (h *BlackSwanHunter) buildCandidate(market gamma.Market, yesToken, noToken 
 	// Score the opportunity:
 	// - Lower price = better payout potential
 	// - Higher opposite confidence = more mispriced
-	// - Higher 24hr volume = more likely to fill and more active market
+	// - Higher 24hr volume = more likely to fill
+	// - Faster resolution = less capital lock-up (CRITICAL for small bankroll)
 	volume24hr := market.GetVolume24hr()
 	volumeBonus := 1.0
 	if volume24hr > 1000 {
-		volumeBonus = 1.0 + (volume24hr / 50000) // Bonus for high volume
+		volumeBonus = 1.0 + (volume24hr / 50000)
 		if volumeBonus > 2.0 {
 			volumeBonus = 2.0
 		}
 	}
-	score := (1 - yesToken.Price) * noToken.Price * 100 * volumeBonus
+
+	// Time bonus: prefer faster resolution (days until end)
+	// Markets ending in 1-7 days get 2x bonus, 7-14 days get 1.5x, 14-30 days get 1x
+	timeBonus := 1.0
+	daysUntil := time.Until(endTime).Hours() / 24
+	if daysUntil <= 7 {
+		timeBonus = 2.0 // Ends this week - excellent
+	} else if daysUntil <= 14 {
+		timeBonus = 1.5 // Ends in 2 weeks - good
+	}
+
+	score := (1 - yesToken.Price) * noToken.Price * 100 * volumeBonus * timeBonus
 
 	return &BlackSwanCandidate{
 		Market:        market,
@@ -481,7 +494,7 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 		bidPrice = h.config.BlackSwanMinPrice
 	}
 
-	// Score with 24hr volume bonus
+	// Score with volume and time bonuses
 	volume24hr := market.GetVolume24hr()
 	volumeBonus := 1.0
 	if volume24hr > 1000 {
@@ -490,7 +503,17 @@ func (h *BlackSwanHunter) buildCandidateNo(market gamma.Market, noToken, yesToke
 			volumeBonus = 2.0
 		}
 	}
-	score := (1 - noToken.Price) * yesToken.Price * 100 * volumeBonus
+
+	// Time bonus: prefer faster resolution
+	timeBonus := 1.0
+	daysUntil := time.Until(endTime).Hours() / 24
+	if daysUntil <= 7 {
+		timeBonus = 2.0
+	} else if daysUntil <= 14 {
+		timeBonus = 1.5
+	}
+
+	score := (1 - noToken.Price) * yesToken.Price * 100 * volumeBonus * timeBonus
 
 	return &BlackSwanCandidate{
 		Market:        market,

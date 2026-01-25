@@ -50,6 +50,7 @@ type Config struct {
 	BlackSwanBidDiscount  float64 // How far below market to bid (default: 0.25 = 25%)
 	BlackSwanMinVolume    float64 // Minimum market volume to consider (default: 100)
 	BlackSwanMaxVolume    float64 // Maximum market volume (avoid liquid markets) (default: 10000)
+	BlackSwanMaxDays      int     // Maximum days until resolution (default: 30) - prefer fast-resolving markets
 }
 
 func Load() (*Config, error) {
@@ -80,6 +81,7 @@ func Load() (*Config, error) {
 		BlackSwanBidDiscount:  getEnvFloat("BLACKSWAN_BID_DISCOUNT", 0.25),
 		BlackSwanMinVolume:    getEnvFloat("BLACKSWAN_MIN_VOLUME", 100),
 		BlackSwanMaxVolume:    getEnvFloat("BLACKSWAN_MAX_VOLUME", 10000),
+		BlackSwanMaxDays:      getEnvInt("BLACKSWAN_MAX_DAYS", 30), // Prefer markets resolving within 30 days
 	}
 
 	var missingFields []string

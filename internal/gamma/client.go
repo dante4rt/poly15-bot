@@ -353,6 +353,14 @@ func (c *Client) SearchMarketsWithParams(params SearchParams) ([]Market, error) 
 	}
 	queryParams.Set("_order", order)
 
+	// Add date range filters if specified
+	if params.EndDateMin != "" {
+		queryParams.Set("end_date_min", params.EndDateMin)
+	}
+	if params.EndDateMax != "" {
+		queryParams.Set("end_date_max", params.EndDateMax)
+	}
+
 	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, queryParams.Encode())
 
 	resp, err := c.doGet(endpoint)

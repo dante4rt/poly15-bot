@@ -210,6 +210,9 @@ type SearchParams struct {
 	// Sorting options
 	OrderBy string // e.g., "volume24hr", "liquidity", "updatedAt"
 	Order   string // "asc" or "desc"
+	// Date range filters (RFC3339 format)
+	EndDateMin string // Minimum end date (e.g., "2026-01-26T00:00:00Z")
+	EndDateMax string // Maximum end date (e.g., "2026-02-26T00:00:00Z")
 }
 
 // GetVolume returns the total volume.
