@@ -375,7 +375,7 @@ func (s *Sniper) ScanForMarkets() error {
 
 	for _, market := range markets {
 		s.mu.RLock()
-		_, exists := s.activeMarkets[market.ConditionID]
+		_, exists := s.activeMarkets[market.Slug]
 		s.mu.RUnlock()
 
 		if exists {
@@ -384,12 +384,12 @@ func (s *Sniper) ScanForMarkets() error {
 
 		tracked, err := s.trackMarket(market)
 		if err != nil {
-			log.Printf("[sniper] failed to track market %s: %v", market.ConditionID, err)
+			log.Printf("[sniper] failed to track market %s: %v", market.Slug, err)
 			continue
 		}
 
 		s.mu.Lock()
-		s.activeMarkets[market.ConditionID] = tracked
+		s.activeMarkets[market.Slug] = tracked
 		s.mu.Unlock()
 
 		log.Printf("[sniper] tracking market: %s (ends: %s)", market.Question, tracked.EndTime.Format(time.RFC3339))
@@ -862,7 +862,7 @@ func (s *Sniper) cleanupExpiredMarkets() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	for conditionID, tracked := range s.activeMarkets {
+	for slug, tracked := range s.activeMarkets {
 		// Remove markets that ended more than 1 minute ago
 		if now.Sub(tracked.EndTime) > 1*time.Minute {
 			// Unsubscribe from WebSocket
@@ -873,7 +873,7 @@ func (s *Sniper) cleanupExpiredMarkets() {
 				log.Printf("[sniper] unsubscribe error: %v", err)
 			}
 
-			delete(s.activeMarkets, conditionID)
+			delete(s.activeMarkets, slug)
 			log.Printf("[sniper] cleaned up expired market: %s", tracked.Market.Question)
 		}
 	}

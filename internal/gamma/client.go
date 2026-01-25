@@ -99,7 +99,8 @@ func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
 				// Verify the market hasn't ended
 				endTime, _ := market.EndTime()
 				if endTime.After(now) {
-					marketMap[market.GetConditionID()] = *market
+					// Use slug as key since ConditionID may be empty
+					marketMap[market.Slug] = *market
 				}
 			}
 		}
@@ -117,7 +118,8 @@ func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
 				// Double-check end time
 				endTime, _ := market.EndTime()
 				if endTime.After(now) {
-					marketMap[market.GetConditionID()] = market
+					// Use slug as key since ConditionID may be empty
+					marketMap[market.Slug] = market
 				}
 			}
 		}
