@@ -1,6 +1,7 @@
 package gamma
 
 import (
+	"encoding/json"
 	"strconv"
 	"strings"
 	"time"
@@ -8,19 +9,54 @@ import (
 
 // Market represents a prediction market from the Gamma API.
 type Market struct {
-	ConditionID   string   `json:"condition_id"`
-	QuestionID    string   `json:"question_id"`
-	Question      string   `json:"question"`
-	Slug          string   `json:"slug"`
-	EndDateISO    string   `json:"end_date_iso"`
-	GameStartTime string   `json:"game_start_time"`
-	Active        bool     `json:"active"`
-	Closed        bool     `json:"closed"`
-	Tokens        []Token  `json:"tokens"`
-	// 15M markets use these fields instead
-	ClobTokenIDs  []string `json:"clob_token_ids"`
-	Outcomes      []string `json:"outcomes"`
-	OutcomePrices []string `json:"outcome_prices"`
+	ConditionID   string  `json:"condition_id"`
+	ConditionId   string  `json:"conditionId"` // Also check camelCase
+	QuestionID    string  `json:"question_id"`
+	Question      string  `json:"question"`
+	Slug          string  `json:"slug"`
+	EndDateISO    string  `json:"end_date_iso"`
+	EndDate       string  `json:"endDate"`
+	GameStartTime string  `json:"game_start_time"`
+	Active        bool    `json:"active"`
+	Closed        bool    `json:"closed"`
+	Tokens        []Token `json:"tokens"`
+	// 15M markets use JSON-encoded strings
+	ClobTokenIDs  string `json:"clobTokenIds"`
+	Outcomes      string `json:"outcomes"`
+	OutcomePrices string `json:"outcomePrices"`
+}
+
+// GetConditionID returns the condition ID (handles both field names)
+func (m *Market) GetConditionID() string {
+	if m.ConditionID != "" {
+		return m.ConditionID
+	}
+	return m.ConditionId
+}
+
+// ParseClobTokenIDs parses the JSON-encoded clobTokenIds string
+func (m *Market) ParseClobTokenIDs() []string {
+	var ids []string
+	json.Unmarshal([]byte(m.ClobTokenIDs), &ids)
+	return ids
+}
+
+// ParseOutcomes parses the JSON-encoded outcomes string
+func (m *Market) ParseOutcomes() []string {
+	var outcomes []string
+	json.Unmarshal([]byte(m.Outcomes), &outcomes)
+	return outcomes
+}
+
+// ParseOutcomePrices parses the JSON-encoded outcomePrices string
+func (m *Market) ParseOutcomePrices() []float64 {
+	var priceStrs []string
+	json.Unmarshal([]byte(m.OutcomePrices), &priceStrs)
+	prices := make([]float64, len(priceStrs))
+	for i, s := range priceStrs {
+		prices[i], _ = strconv.ParseFloat(s, 64)
+	}
+	return prices
 }
 
 // Is15MinMarket returns true if this is a 15-minute up/down market.
@@ -49,9 +85,16 @@ type Token struct {
 	Price   float64 `json:"price,string"`
 }
 
-// EndTime parses the end time from EndDateISO or extracts from slug for 15M markets.
+// EndTime parses the end time from various fields or extracts from slug for 15M markets.
 func (m *Market) EndTime() (time.Time, error) {
-	// Try EndDateISO first
+	// Try EndDate (used by 15M markets)
+	if m.EndDate != "" {
+		t, err := time.Parse(time.RFC3339, m.EndDate)
+		if err == nil {
+			return t, nil
+		}
+	}
+	// Try EndDateISO
 	if m.EndDateISO != "" {
 		t, err := time.Parse(time.RFC3339, m.EndDateISO)
 		if err == nil {
@@ -65,7 +108,7 @@ func (m *Market) EndTime() (time.Time, error) {
 			return t, nil
 		}
 	}
-	// For 15M markets, extract from slug
+	// For 15M markets, extract from slug as fallback
 	if m.Is15MinMarket() {
 		return m.ExtractEndTimeFromSlug()
 	}
@@ -90,17 +133,20 @@ func (m *Market) GetYesToken() *Token {
 			return &m.Tokens[i]
 		}
 	}
-	// Check 15M market format (ClobTokenIDs + Outcomes)
-	if len(m.ClobTokenIDs) >= 2 && len(m.Outcomes) >= 2 {
-		for i, outcome := range m.Outcomes {
+	// Check 15M market format (JSON-encoded strings)
+	tokenIDs := m.ParseClobTokenIDs()
+	outcomes := m.ParseOutcomes()
+	prices := m.ParseOutcomePrices()
+	if len(tokenIDs) >= 2 && len(outcomes) >= 2 {
+		for i, outcome := range outcomes {
 			o := strings.ToLower(outcome)
 			if o == "yes" || o == "up" {
 				price := 0.0
-				if i < len(m.OutcomePrices) {
-					price, _ = strconv.ParseFloat(m.OutcomePrices[i], 64)
+				if i < len(prices) {
+					price = prices[i]
 				}
 				return &Token{
-					TokenID: m.ClobTokenIDs[i],
+					TokenID: tokenIDs[i],
 					Outcome: outcome,
 					Price:   price,
 				}
@@ -119,17 +165,20 @@ func (m *Market) GetNoToken() *Token {
 			return &m.Tokens[i]
 		}
 	}
-	// Check 15M market format (ClobTokenIDs + Outcomes)
-	if len(m.ClobTokenIDs) >= 2 && len(m.Outcomes) >= 2 {
-		for i, outcome := range m.Outcomes {
+	// Check 15M market format (JSON-encoded strings)
+	tokenIDs := m.ParseClobTokenIDs()
+	outcomes := m.ParseOutcomes()
+	prices := m.ParseOutcomePrices()
+	if len(tokenIDs) >= 2 && len(outcomes) >= 2 {
+		for i, outcome := range outcomes {
 			o := strings.ToLower(outcome)
 			if o == "no" || o == "down" {
 				price := 0.0
-				if i < len(m.OutcomePrices) {
-					price, _ = strconv.ParseFloat(m.OutcomePrices[i], 64)
+				if i < len(prices) {
+					price = prices[i]
 				}
 				return &Token{
-					TokenID: m.ClobTokenIDs[i],
+					TokenID: tokenIDs[i],
 					Outcome: outcome,
 					Price:   price,
 				}
