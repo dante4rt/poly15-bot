@@ -24,6 +24,9 @@ type Market struct {
 	ClobTokenIDs  string `json:"clobTokenIds"`
 	Outcomes      string `json:"outcomes"`
 	OutcomePrices string `json:"outcomePrices"`
+	// Gamma's indicative prices (more accurate than CLOB order book)
+	BestBid float64 `json:"bestBid"`
+	BestAsk float64 `json:"bestAsk"`
 }
 
 // GetConditionID returns the condition ID (handles both field names)

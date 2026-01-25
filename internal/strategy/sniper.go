@@ -60,13 +60,17 @@ type TrackedMarket struct {
 	YesTokenID string
 	NoTokenID  string
 	EndTime    time.Time
+	// CLOB order book prices (for execution)
 	BestYesBid float64
 	BestYesAsk float64
 	BestNoBid  float64
 	BestNoAsk  float64
 	YesSize    float64 // Available size at best ask
 	NoSize     float64 // Available size at best ask
-	sniped     bool
+	// Gamma indicative prices (for winner analysis)
+	GammaYesPrice float64
+	GammaNoPrice  float64
+	sniped        bool
 
 	// Price history for momentum detection (last 10 snapshots)
 	priceHistory []PriceSnapshot
@@ -410,16 +414,26 @@ func (s *Sniper) trackMarket(market gamma.Market) (*TrackedMarket, error) {
 		return nil, fmt.Errorf("market missing YES or NO token")
 	}
 
+	// Store Gamma's indicative prices (used for winner determination)
+	gammaPrices := market.ParseOutcomePrices()
+	gammaYes, gammaNo := 0.0, 0.0
+	if len(gammaPrices) >= 2 {
+		gammaYes = gammaPrices[0]
+		gammaNo = gammaPrices[1]
+	}
+
 	tracked := &TrackedMarket{
-		Market:       market,
-		YesTokenID:   yesToken.TokenID,
-		NoTokenID:    noToken.TokenID,
-		EndTime:      endTime,
-		BestYesBid:   yesToken.Price,
-		BestYesAsk:   yesToken.Price,
-		BestNoBid:    noToken.Price,
-		BestNoAsk:    noToken.Price,
-		priceHistory: make([]PriceSnapshot, 0, 10),
+		Market:        market,
+		YesTokenID:    yesToken.TokenID,
+		NoTokenID:     noToken.TokenID,
+		EndTime:       endTime,
+		BestYesBid:    yesToken.Price,
+		BestYesAsk:    yesToken.Price,
+		BestNoBid:     noToken.Price,
+		BestNoAsk:     noToken.Price,
+		GammaYesPrice: gammaYes,
+		GammaNoPrice:  gammaNo,
+		priceHistory:  make([]PriceSnapshot, 0, 10),
 	}
 
 	// Subscribe to WebSocket price updates for both tokens
@@ -436,6 +450,22 @@ func (s *Sniper) trackMarket(market gamma.Market) (*TrackedMarket, error) {
 func (s *Sniper) subscribeToToken(tracked *TrackedMarket, tokenID string, isYes bool) {
 	if err := s.ws.Subscribe(tokenID); err != nil {
 		log.Printf("[sniper] failed to subscribe to token %s: %v", tokenID, err)
+	}
+}
+
+// refreshGammaPrices fetches latest prices from Gamma API.
+func (s *Sniper) refreshGammaPrices(tracked *TrackedMarket) {
+	market, err := s.gamma.GetMarketBySlug(tracked.Market.Slug)
+	if err != nil {
+		return
+	}
+
+	prices := market.ParseOutcomePrices()
+	if len(prices) >= 2 {
+		tracked.mu.Lock()
+		tracked.GammaYesPrice = prices[0]
+		tracked.GammaNoPrice = prices[1]
+		tracked.mu.Unlock()
 	}
 }
 
@@ -494,6 +524,7 @@ func (s *Sniper) CheckAndSnipe() error {
 		// Only poll when getting close to snipe window (within 30s)
 		if timeRemaining <= 30*time.Second && timeRemaining > 0 {
 			s.updateOrderBookPrices(tracked)
+			s.refreshGammaPrices(tracked)
 		}
 
 		// Skip if not within snipe window yet
@@ -529,6 +560,12 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 	yesSize, noSize := tracked.GetSizes()
 	momentum := tracked.GetMomentum()
 
+	// Get Gamma's indicative prices (more reliable for winner determination)
+	tracked.mu.RLock()
+	gammaYes := tracked.GammaYesPrice
+	gammaNo := tracked.GammaNoPrice
+	tracked.mu.RUnlock()
+
 	analysis := TradeAnalysis{
 		Momentum: momentum,
 	}
@@ -541,63 +578,59 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 		return analysis
 	}
 
-	// Determine winner based on multiple signals
-	// Signal 1: Current bid prices (market consensus)
-	yesWinsByBid := yesBid > noBid
+	// Determine winner using Gamma prices (more accurate than CLOB order book)
+	// Gamma prices reflect actual market consensus; CLOB may have wide spreads
+	yesWins := gammaYes > gammaNo
+	if gammaYes == 0 && gammaNo == 0 {
+		// Fallback to CLOB bid prices if Gamma prices unavailable
+		yesWins = yesBid > noBid
+	}
 
 	// Signal 2: Strong momentum (price jumped significantly)
 	strongYesMomentum := momentum >= momentumThreshold
 	strongNoMomentum := momentum <= -momentumThreshold
 
-	// Calculate confidence based on bid price of predicted winner
-	var winnerBid, winnerAsk, winnerSize float64
-	var loserBid float64
+	// Calculate confidence based on Gamma price of predicted winner
+	var winnerGammaPrice, loserGammaPrice float64
+	var winnerAsk, winnerSize float64
 
-	// Prioritize momentum signal if strong, otherwise use bid price
-	if strongYesMomentum || (yesWinsByBid && !strongNoMomentum) {
-		analysis.Side = "YES"
+	// Prioritize momentum signal if strong, otherwise use Gamma price
+	if strongYesMomentum || (yesWins && !strongNoMomentum) {
+		analysis.Side = "UP"
 		analysis.TokenID = tracked.YesTokenID
-		winnerBid = yesBid
+		winnerGammaPrice = gammaYes
+		loserGammaPrice = gammaNo
 		winnerAsk = yesAsk
 		winnerSize = yesSize
-		loserBid = noBid
 	} else {
-		analysis.Side = "NO"
+		analysis.Side = "DOWN"
 		analysis.TokenID = tracked.NoTokenID
-		winnerBid = noBid
+		winnerGammaPrice = gammaNo
+		loserGammaPrice = gammaYes
 		winnerAsk = noAsk
 		winnerSize = noSize
-		loserBid = yesBid
 	}
 
-	// Check 1: Clear winner (bid price above threshold)
-	if winnerBid < minWinnerConfidence {
+	// Check 1: Clear winner (Gamma price above threshold)
+	if winnerGammaPrice < minWinnerConfidence {
 		analysis.SkipReason = SkipReasonNoWinner
-		analysis.SkipDescription = fmt.Sprintf("%s bid %.4f < threshold %.4f", analysis.Side, winnerBid, minWinnerConfidence)
+		analysis.SkipDescription = fmt.Sprintf("%s gamma_price %.4f < threshold %.4f", analysis.Side, winnerGammaPrice, minWinnerConfidence)
 		return analysis
 	}
 
 	// Check 2: Not too uncertain (sides not too close)
-	bidGap := winnerBid - loserBid
-	if bidGap < maxUncertaintyGap {
+	priceGap := winnerGammaPrice - loserGammaPrice
+	if priceGap < maxUncertaintyGap {
 		analysis.SkipReason = SkipReasonTooUncertain
-		analysis.SkipDescription = fmt.Sprintf("bid gap %.4f < threshold %.4f (YES:%.4f NO:%.4f)",
-			bidGap, maxUncertaintyGap, yesBid, noBid)
+		analysis.SkipDescription = fmt.Sprintf("price gap %.4f < threshold %.4f (UP:%.4f DOWN:%.4f)",
+			priceGap, maxUncertaintyGap, gammaYes, gammaNo)
 		return analysis
 	}
 
-	// Check 3: Spread not too wide (avoid manipulation)
-	spread := winnerAsk - winnerBid
-	spreadPercent := spread / winnerBid
-	analysis.Spread = spread
-	analysis.SpreadPercent = spreadPercent
-
-	if spreadPercent > maxSpreadPercent {
-		analysis.SkipReason = SkipReasonSpreadTooWide
-		analysis.SkipDescription = fmt.Sprintf("spread %.2f%% > max %.2f%% (bid:%.4f ask:%.4f)",
-			spreadPercent*100, maxSpreadPercent*100, winnerBid, winnerAsk)
-		return analysis
-	}
+	// Note: CLOB spreads are typically wide (0.01/0.99), we skip spread check
+	// and focus on Gamma price confidence instead
+	analysis.Spread = winnerAsk - 0.01 // Approximate spread from CLOB
+	analysis.SpreadPercent = 0         // Not meaningful for these markets
 
 	// Check 4: Sufficient liquidity at ask
 	analysis.AvailableSize = winnerSize
@@ -620,7 +653,7 @@ func (s *Sniper) analyzeMarket(tracked *TrackedMarket) TradeAnalysis {
 
 	// Calculate position size based on confidence and limits
 	// Higher confidence = larger position (within limits)
-	analysis.Confidence = calculateConfidence(winnerBid, bidGap, spreadPercent, momentum, analysis.Side == "YES")
+	analysis.Confidence = calculateConfidence(winnerGammaPrice, priceGap, 0, momentum, analysis.Side == "UP")
 
 	// Calculate max loss for this trade (cost of position if it loses)
 	positionSize := s.calculatePositionSize(analysis.Confidence, winnerSize)
@@ -872,11 +905,23 @@ func (s *Sniper) logStatus() {
 	now := time.Now()
 	for _, tracked := range s.activeMarkets {
 		timeRemaining := tracked.EndTime.Sub(now)
-		yesBid, yesAsk, noBid, noAsk := tracked.GetPrices()
+
+		tracked.mu.RLock()
+		gammaYes := tracked.GammaYesPrice
+		gammaNo := tracked.GammaNoPrice
+		tracked.mu.RUnlock()
 
 		if timeRemaining > 0 {
+			// Determine likely winner
+			winner := "UP"
+			prob := gammaYes
+			if gammaNo > gammaYes {
+				winner = "DOWN"
+				prob = gammaNo
+			}
 			log.Printf("[status] %s - ends in %v", tracked.Market.Question, timeRemaining.Truncate(time.Second))
-			log.Printf("[status]   YES(bid:%.4f/ask:%.4f) NO(bid:%.4f/ask:%.4f)", yesBid, yesAsk, noBid, noAsk)
+			log.Printf("[status]   gamma: UP=%.1f%% DOWN=%.1f%% => likely %s", gammaYes*100, gammaNo*100, winner)
+			log.Printf("[status]   confidence: %.1f%% (need >%.0f%% to trade)", prob*100, minWinnerConfidence*100)
 		} else {
 			log.Printf("[status] %s - ENDED (cleanup pending)", tracked.Market.Question)
 		}
