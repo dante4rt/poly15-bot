@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	baseURL            = "https://gamma-api.polymarket.com"
-	defaultTimeout     = 30 * time.Second
-	defaultLimit       = 100
+	baseURL             = "https://gamma-api.polymarket.com"
+	clobURL             = "https://clob.polymarket.com"
+	defaultTimeout      = 30 * time.Second
+	defaultLimit        = 100
 	upDownWindowMinutes = 20
 )
 
@@ -74,23 +75,36 @@ func (c *Client) SearchMarkets(query string) ([]Market, error) {
 // GetActiveUpDownMarkets retrieves active 15-minute BTC/ETH up-or-down markets
 // expiring within the next 20 minutes.
 func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
-	queries := []string{
-		"Bitcoin Up or Down",
-		"Ethereum Up or Down",
-		"Bitcoin 15-min",
-		"Ethereum 15-min",
-		"BTC Up or Down",
-		"ETH Up or Down",
-	}
-
+	// 15M markets use slug pattern: {asset}-updown-15m-{timestamp}
+	assets := []string{"btc", "eth", "sol", "xrp"}
 	marketMap := make(map[string]Market)
 
+	// Try fetching by slug pattern for current and next few windows
+	now := time.Now().Unix()
+	// Round to next 15-minute boundary
+	windowSize := int64(15 * 60)
+	currentWindow := ((now / windowSize) + 1) * windowSize
+
+	for _, asset := range assets {
+		// Check current and next 2 windows
+		for i := int64(0); i < 3; i++ {
+			targetTime := currentWindow + (i * windowSize)
+			slug := fmt.Sprintf("%s-updown-15m-%d", asset, targetTime)
+
+			market, err := c.GetMarketBySlug(slug)
+			if err == nil && market != nil && market.Active && !market.Closed {
+				marketMap[market.ConditionID] = *market
+			}
+		}
+	}
+
+	// Fallback: also try text search
+	queries := []string{"updown-15m", "up or down"}
 	for _, query := range queries {
 		markets, err := c.SearchMarkets(query)
 		if err != nil {
 			continue
 		}
-
 		for _, market := range markets {
 			if c.isValidUpDownMarket(market) {
 				marketMap[market.ConditionID] = market
@@ -104,6 +118,35 @@ func (c *Client) GetActiveUpDownMarkets() ([]Market, error) {
 	}
 
 	return result, nil
+}
+
+// GetMarketBySlug fetches a market by its slug.
+func (c *Client) GetMarketBySlug(slug string) (*Market, error) {
+	params := url.Values{}
+	params.Set("slug", slug)
+
+	endpoint := fmt.Sprintf("%s/markets?%s", c.baseURL, params.Encode())
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch market: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
+	var markets []Market
+	if err := json.NewDecoder(resp.Body).Decode(&markets); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if len(markets) == 0 {
+		return nil, fmt.Errorf("market not found: %s", slug)
+	}
+
+	return &markets[0], nil
 }
 
 // isValidUpDownMarket checks if a market meets the criteria for 15-min trading.

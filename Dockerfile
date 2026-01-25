@@ -5,12 +5,13 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /build
 
-# Cache dependencies
-COPY go.mod go.sum ./
-RUN go mod download
+# Copy go.mod first, generate go.sum if needed
+COPY go.mod ./
+RUN go mod download || true
 
 # Copy source and build
 COPY . .
+RUN go mod tidy
 
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o sniper ./cmd/sniper
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o scanner ./cmd/scanner

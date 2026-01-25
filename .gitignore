@@ -13,7 +13,6 @@ bin/
 
 # Go
 vendor/
-go.sum
 
 # OS
 .DS_Store

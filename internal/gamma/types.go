@@ -1,16 +1,25 @@
 package gamma
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Market represents a prediction market from the Gamma API.
 type Market struct {
 	ConditionID string  `json:"condition_id"`
 	QuestionID  string  `json:"question_id"`
 	Question    string  `json:"question"`
+	Slug        string  `json:"slug"`
 	EndDateISO  string  `json:"end_date_iso"`
 	Active      bool    `json:"active"`
 	Closed      bool    `json:"closed"`
 	Tokens      []Token `json:"tokens"`
+}
+
+// Is15MinMarket returns true if this is a 15-minute up/down market.
+func (m *Market) Is15MinMarket() bool {
+	return strings.Contains(m.Slug, "-updown-15m-")
 }
 
 // Token represents a tradeable outcome token within a market.
