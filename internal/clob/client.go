@@ -285,13 +285,13 @@ func (c *Client) GetOpenOrders() ([]Order, error) {
 	}
 	log.Printf("[clob] GetOpenOrders raw response: %s", logBody)
 
-	// API returns object wrapper: {"orders": [...]}
+	// API returns object wrapper: {"data": [...]}
 	var response OpenOrdersResponse
 	if err := json.Unmarshal(respBody, &response); err != nil {
 		return nil, fmt.Errorf("failed to decode orders: %w (body: %s)", err, string(respBody))
 	}
 
-	return response.Orders, nil
+	return response.Data, nil
 }
 
 // GetBalanceAllowance fetches the balance and allowance for an asset type.

@@ -92,7 +92,7 @@ type CancelOrderRequest struct {
 
 // OpenOrdersResponse represents the response from fetching open orders.
 type OpenOrdersResponse struct {
-	Orders []Order `json:"orders"`
+	Data []Order `json:"data"`
 }
 
 // APIError represents an error response from the CLOB API.
