@@ -30,7 +30,7 @@ func main() {
 	log.SetFlags(log.Ltime | log.Lmsgprefix)
 	log.SetPrefix("[sports] ")
 
-	fmt.Println(banner)
+	fmt.Print(banner)
 	fmt.Println(strings.Repeat("-", 60))
 
 	// Load configuration

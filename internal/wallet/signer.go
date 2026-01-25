@@ -17,8 +17,11 @@ const (
 	ChainID    = 137 // Polygon Mainnet
 )
 
-// Polymarket CTF Exchange contract address on Polygon
-var ExchangeContract = common.HexToAddress("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E")
+// Polymarket CTF Exchange contract addresses on Polygon
+var (
+	ExchangeContract        = common.HexToAddress("0x4bFb41d5B3570DeFd03C39a9A4D8dE6Bd8B8982E") // Standard CTF Exchange
+	NegRiskExchangeContract = common.HexToAddress("0xC5d563A36AE78145C45a50134d48A1215220f80a") // Neg Risk CTF Exchange
+)
 
 // Order side constants
 const (

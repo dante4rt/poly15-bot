@@ -287,6 +287,35 @@ func (c *Client) GetOpenOrders() ([]Order, error) {
 	return response.Data, nil
 }
 
+// NegRiskResponse represents the response from the neg-risk endpoint.
+type NegRiskResponse struct {
+	NegRisk bool `json:"neg_risk"`
+}
+
+// GetNegRisk checks if a token uses the Neg Risk CTF Exchange.
+func (c *Client) GetNegRisk(tokenID string) (bool, error) {
+	path := fmt.Sprintf("/neg-risk?token_id=%s", tokenID)
+
+	resp, err := c.doRequest(http.MethodGet, path, nil)
+	if err != nil {
+		return false, fmt.Errorf("failed to get neg risk status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("status %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result NegRiskResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return false, fmt.Errorf("failed to decode neg risk response: %w (body: %s)", err, string(respBody))
+	}
+
+	return result.NegRisk, nil
+}
+
 // GetBalanceAllowance fetches the balance and allowance for an asset type.
 // assetType: "COLLATERAL" for USDC, "CONDITIONAL" for position tokens
 // tokenID: required for CONDITIONAL, ignored for COLLATERAL

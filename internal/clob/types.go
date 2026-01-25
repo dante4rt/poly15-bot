@@ -21,8 +21,8 @@ type Order struct {
 	Hash          string `json:"hash,omitempty"`
 	OrderHash     string `json:"orderHash,omitempty"`
 
-	// Order details
-	Salt          int64  `json:"salt"`          // integer, not string
+	// Order details (camelCase per Polymarket CLOB API)
+	Salt          int64  `json:"salt"`
 	Maker         string `json:"maker"`
 	Signer        string `json:"signer"`
 	Taker         string `json:"taker"`
@@ -74,7 +74,7 @@ const (
 // OrderRequest represents a request to create a new order.
 type OrderRequest struct {
 	Order     Order  `json:"order"`
-	Owner     string `json:"owner"`     // wallet address
+	Owner     string `json:"owner"`
 	OrderType string `json:"orderType"`
 }
 

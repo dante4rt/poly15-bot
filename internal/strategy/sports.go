@@ -514,13 +514,13 @@ func (s *SportsSniper) modeString() string {
 }
 
 // GetActiveMarkets returns currently tracked markets.
-func (s *SportsSniper) GetActiveMarkets() []TrackedSportsMarket {
+func (s *SportsSniper) GetActiveMarkets() []*TrackedSportsMarket {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]TrackedSportsMarket, 0, len(s.activeMarkets))
+	result := make([]*TrackedSportsMarket, 0, len(s.activeMarkets))
 	for _, m := range s.activeMarkets {
-		result = append(result, *m)
+		result = append(result, m)
 	}
 	return result
 }

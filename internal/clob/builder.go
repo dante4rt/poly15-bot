@@ -6,6 +6,7 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/dantezy/polymarket-sniper/internal/wallet"
@@ -27,20 +28,23 @@ const (
 
 // OrderBuilder constructs and signs orders for the CLOB.
 type OrderBuilder struct {
-	signer           *wallet.Signer
-	maker            common.Address // The maker/funder address (proxy wallet if set, else EOA)
-	signerAddr       common.Address // The EOA that signs orders
-	apiKey           string         // API key used as owner for orders
+	signer           *wallet.Signer   // Standard CTF Exchange signer
+	negRiskSigner    *wallet.Signer   // Neg Risk CTF Exchange signer
+	maker            common.Address   // The maker/funder address (proxy wallet if set, else EOA)
+	signerAddr       common.Address   // The EOA that signs orders
+	apiKey           string           // API key used as owner for orders
 	nonce            *big.Int
-	useProxyWallet   bool           // True if using Gnosis Safe proxy wallet
+	useProxyWallet   bool             // True if using Gnosis Safe proxy wallet
 }
 
 // NewOrderBuilder creates a new OrderBuilder with the given wallet and API key.
 // This creates an EOA-mode builder (signature type 0).
 func NewOrderBuilder(w *wallet.Wallet, apiKey string) *OrderBuilder {
 	signer := wallet.NewSigner(w)
+	negRiskSigner := wallet.NewSignerWithConfig(w, wallet.ChainID, wallet.NegRiskExchangeContract)
 	return &OrderBuilder{
 		signer:         signer,
+		negRiskSigner:  negRiskSigner,
 		maker:          w.Address(),
 		signerAddr:     w.Address(),
 		apiKey:         apiKey,
@@ -51,11 +55,13 @@ func NewOrderBuilder(w *wallet.Wallet, apiKey string) *OrderBuilder {
 
 // NewOrderBuilderWithProxy creates an OrderBuilder that uses a Polymarket proxy wallet.
 // The proxyWalletAddress is the Gnosis Safe address that holds the user's funds.
-// Orders are signed by the EOA but use signature type 2 (PolyGnosis).
+// Orders are signed by the EOA but use signature type 1 (Poly).
 func NewOrderBuilderWithProxy(w *wallet.Wallet, apiKey string, proxyWalletAddress common.Address) *OrderBuilder {
 	signer := wallet.NewSigner(w)
+	negRiskSigner := wallet.NewSignerWithConfig(w, wallet.ChainID, wallet.NegRiskExchangeContract)
 	return &OrderBuilder{
 		signer:         signer,
+		negRiskSigner:  negRiskSigner,
 		maker:          proxyWalletAddress, // The proxy wallet is the maker/funder
 		signerAddr:     w.Address(),        // The EOA signs the orders
 		apiKey:         apiKey,
@@ -91,11 +97,12 @@ func (b *OrderBuilder) Address() common.Address {
 type BuildParams struct {
 	TokenID     string
 	Side        OrderSide
-	Price       float64  // Price in range [0, 1]
-	Size        float64  // Size in USDC
+	Price       float64   // Price in range [0, 1]
+	Size        float64   // Size in USDC
 	OrderType   OrderType
-	Expiration  int64    // Unix timestamp, 0 for default
-	FeeRateBps  int      // Fee rate in basis points, -1 for default
+	Expiration  int64     // Unix timestamp, 0 for default
+	FeeRateBps  int       // Fee rate in basis points, -1 for default
+	NegRisk     bool      // True if market uses Neg Risk CTF Exchange
 }
 
 // BuildOrder creates a signed order request.
@@ -207,18 +214,24 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 		SignatureType: sigType,
 	}
 
-	// Sign the order
-	signature, err := b.signer.SignOrder(order)
+	// Sign the order using the appropriate signer (standard vs neg risk exchange)
+	var signature string
+	if params.NegRisk {
+		signature, err = b.negRiskSigner.SignOrder(order)
+	} else {
+		signature, err = b.signer.SignOrder(order)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to sign order: %w", err)
 	}
 
 	// Convert to API order format
+	// Note: Polymarket expects lowercase addresses (not checksummed)
 	apiOrder := Order{
 		Salt:          salt.Int64(),
-		Maker:         b.maker.Hex(),
-		Signer:        b.signerAddr.Hex(),
-		Taker:         common.Address{}.Hex(), // zero address for any taker
+		Maker:         strings.ToLower(b.maker.Hex()),
+		Signer:        strings.ToLower(b.signerAddr.Hex()),
+		Taker:         strings.ToLower(common.Address{}.Hex()), // zero address for any taker
 		TokenID:       params.TokenID,
 		MakerAmount:   makerAmount.String(),
 		TakerAmount:   takerAmount.String(),
@@ -260,7 +273,8 @@ func (b *OrderBuilder) BuildFOKSellOrder(tokenID string, price, size float64) (*
 }
 
 // BuildGTCBuyOrder creates a good-till-cancelled buy order.
-func (b *OrderBuilder) BuildGTCBuyOrder(tokenID string, price, size float64) (*OrderRequest, error) {
+// negRisk should be true if the market uses the Neg Risk CTF Exchange.
+func (b *OrderBuilder) BuildGTCBuyOrder(tokenID string, price, size float64, negRisk bool) (*OrderRequest, error) {
 	return b.BuildOrder(BuildParams{
 		TokenID:    tokenID,
 		Side:       OrderSideBuy,
@@ -268,6 +282,7 @@ func (b *OrderBuilder) BuildGTCBuyOrder(tokenID string, price, size float64) (*O
 		Size:       size,
 		OrderType:  OrderTypeGTC,
 		FeeRateBps: defaultFeeRateBps,
+		NegRisk:    negRisk,
 	})
 }
 

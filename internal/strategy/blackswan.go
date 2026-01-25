@@ -35,6 +35,7 @@ type BlackSwanCandidate struct {
 	Volume        float64
 	EndTime       time.Time
 	OverConfident bool // True if one side > 90%
+	NegRisk       bool // True if market uses Neg Risk CTF Exchange
 }
 
 // OpenPosition tracks an active limit order.
@@ -594,8 +595,15 @@ func (h *BlackSwanHunter) PlaceBet(candidate BlackSwanCandidate) error {
 		return nil
 	}
 
+	// Check if market uses Neg Risk CTF Exchange
+	negRisk, err := h.clob.GetNegRisk(candidate.TokenID)
+	if err != nil {
+		log.Printf("[blackswan] warning: failed to check neg_risk for %s: %v (assuming standard)", candidate.TokenID, err)
+		negRisk = false
+	}
+
 	// Build GTC limit order (size = number of shares)
-	order, err := h.builder.BuildGTCBuyOrder(candidate.TokenID, candidate.BidPrice, shares)
+	order, err := h.builder.BuildGTCBuyOrder(candidate.TokenID, candidate.BidPrice, shares, negRisk)
 	if err != nil {
 		return fmt.Errorf("failed to build order: %w", err)
 	}

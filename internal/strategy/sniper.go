@@ -958,13 +958,13 @@ func (s *Sniper) modeString() string {
 }
 
 // GetActiveMarkets returns a snapshot of currently tracked markets.
-func (s *Sniper) GetActiveMarkets() []TrackedMarket {
+func (s *Sniper) GetActiveMarkets() []*TrackedMarket {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	result := make([]TrackedMarket, 0, len(s.activeMarkets))
+	result := make([]*TrackedMarket, 0, len(s.activeMarkets))
 	for _, m := range s.activeMarkets {
-		result = append(result, *m)
+		result = append(result, m)
 	}
 	return result
 }
