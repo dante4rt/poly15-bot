@@ -1,0 +1,23 @@
+[Unit]
+Description=Polymarket Black Swan Hunter Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/poly15-bot
+ExecStart=/root/poly15-bot/bin/blackswan
+Restart=always
+RestartSec=10
+Environment=DRY_RUN=false
+
+# Load environment from .env file
+EnvironmentFile=/root/poly15-bot/.env
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=blackswan
+
+[Install]
+WantedBy=multi-user.target

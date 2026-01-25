@@ -3,6 +3,7 @@ package gamma
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -44,12 +45,43 @@ func NewClientWithTimeout(timeout time.Duration) *Client {
 	}
 }
 
-// NewClientWithProxy creates a new Gamma API client with HTTP proxy support.
+// NewClientWithProxy creates a new Gamma API client with HTTP or SOCKS5 proxy support.
 func NewClientWithProxy(proxyURL string) *Client {
-	proxyURLParsed, _ := url.Parse("http://" + proxyURL)
-	transport := &http.Transport{
-		Proxy: http.ProxyURL(proxyURLParsed),
+	var transport *http.Transport
+
+	if strings.HasPrefix(proxyURL, "socks5://") {
+		// SOCKS5 proxy
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			// Fallback to no proxy on parse error
+			return NewClient()
+		}
+
+		var auth *socks5Auth
+		if u.User != nil {
+			pass, _ := u.User.Password()
+			auth = &socks5Auth{
+				User:     u.User.Username(),
+				Password: pass,
+			}
+		}
+
+		dialer, err := newSocks5Dialer(u.Host, auth)
+		if err != nil {
+			return NewClient()
+		}
+
+		transport = &http.Transport{
+			Dial: dialer.Dial,
+		}
+	} else {
+		// HTTP proxy (default)
+		proxyURLParsed, _ := url.Parse("http://" + proxyURL)
+		transport = &http.Transport{
+			Proxy: http.ProxyURL(proxyURLParsed),
+		}
 	}
+
 	return &Client{
 		httpClient: &http.Client{
 			Timeout:   defaultTimeout,
@@ -57,6 +89,77 @@ func NewClientWithProxy(proxyURL string) *Client {
 		},
 		baseURL: baseURL,
 	}
+}
+
+// socks5Auth holds SOCKS5 authentication credentials.
+type socks5Auth struct {
+	User     string
+	Password string
+}
+
+// socks5Dialer wraps a net.Dialer for SOCKS5 connections.
+type socks5Dialer struct {
+	addr string
+	auth *socks5Auth
+}
+
+func newSocks5Dialer(addr string, auth *socks5Auth) (*socks5Dialer, error) {
+	return &socks5Dialer{addr: addr, auth: auth}, nil
+}
+
+func (d *socks5Dialer) Dial(network, addr string) (net.Conn, error) {
+	// Connect to SOCKS5 proxy
+	conn, err := net.DialTimeout("tcp", d.addr, 10*time.Second)
+	if err != nil {
+		return nil, err
+	}
+
+	// SOCKS5 handshake
+	if d.auth != nil {
+		// Auth required
+		conn.Write([]byte{0x05, 0x01, 0x02}) // Version 5, 1 method, username/password
+	} else {
+		conn.Write([]byte{0x05, 0x01, 0x00}) // Version 5, 1 method, no auth
+	}
+
+	resp := make([]byte, 2)
+	conn.Read(resp)
+
+	if resp[1] == 0x02 && d.auth != nil {
+		// Username/password auth
+		authReq := []byte{0x01}
+		authReq = append(authReq, byte(len(d.auth.User)))
+		authReq = append(authReq, []byte(d.auth.User)...)
+		authReq = append(authReq, byte(len(d.auth.Password)))
+		authReq = append(authReq, []byte(d.auth.Password)...)
+		conn.Write(authReq)
+
+		authResp := make([]byte, 2)
+		conn.Read(authResp)
+		if authResp[1] != 0x00 {
+			conn.Close()
+			return nil, fmt.Errorf("SOCKS5 auth failed")
+		}
+	}
+
+	// Connect request
+	host, portStr, _ := net.SplitHostPort(addr)
+	port, _ := strconv.Atoi(portStr)
+
+	req := []byte{0x05, 0x01, 0x00, 0x03} // Version 5, connect, reserved, domain
+	req = append(req, byte(len(host)))
+	req = append(req, []byte(host)...)
+	req = append(req, byte(port>>8), byte(port&0xff))
+	conn.Write(req)
+
+	connResp := make([]byte, 10)
+	conn.Read(connResp)
+	if connResp[1] != 0x00 {
+		conn.Close()
+		return nil, fmt.Errorf("SOCKS5 connect failed: %d", connResp[1])
+	}
+
+	return conn, nil
 }
 
 // doGet performs a GET request with browser-like headers.

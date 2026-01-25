@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -57,26 +58,24 @@ func NewClientWithProxy(apiKey, secret, passphrase, address, proxyURL string) (*
 	var transport *http.Transport
 
 	// Check if it's explicitly a SOCKS5 proxy
-	if len(proxyURL) > 9 && proxyURL[:9] == "socks5://" {
-		// SOCKS5 proxy
-		proxyURL = proxyURL[9:] // Remove socks5:// prefix
+	if strings.HasPrefix(proxyURL, "socks5://") {
+		// SOCKS5 proxy - parse the full URL
+		u, err := url.Parse(proxyURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse SOCKS5 proxy URL: %w", err)
+		}
 
 		var auth *proxy.Auth
-		var addr string
-
-		if u, err := url.Parse("socks5://" + proxyURL); err == nil && u.User != nil {
+		if u.User != nil {
 			auth = &proxy.Auth{
 				User: u.User.Username(),
 			}
 			if pass, ok := u.User.Password(); ok {
 				auth.Password = pass
 			}
-			addr = u.Host
-		} else {
-			addr = proxyURL
 		}
 
-		dialer, err := proxy.SOCKS5("tcp", addr, auth, proxy.Direct)
+		dialer, err := proxy.SOCKS5("tcp", u.Host, auth, proxy.Direct)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create SOCKS5 dialer: %w", err)
 		}
