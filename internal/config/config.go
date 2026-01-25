@@ -34,6 +34,16 @@ type Config struct {
 	// Strategy parameters
 	MinConfidence  float64 // Minimum winner confidence (e.g., 0.50 = 50%)
 	MaxUncertainty float64 // Max gap between sides to consider uncertain (e.g., 0.10 = 10%)
+
+	// Black Swan strategy parameters ($15 bankroll optimized)
+	BlackSwanMaxPrice     float64 // Max price to consider (default: 0.10 = 10¢)
+	BlackSwanMinPrice     float64 // Min price to avoid dust (default: 0.005 = 0.5¢)
+	BlackSwanBetPercent   float64 // Bankroll percentage per bet (default: 0.05 = 5%)
+	BlackSwanMaxPositions int     // Maximum concurrent open positions (default: 10)
+	BlackSwanMaxExposure  float64 // Maximum total exposure in USD (default: 10)
+	BlackSwanBidDiscount  float64 // How far below market to bid (default: 0.25 = 25%)
+	BlackSwanMinVolume    float64 // Minimum market volume to consider (default: 100)
+	BlackSwanMaxVolume    float64 // Maximum market volume (avoid liquid markets) (default: 10000)
 }
 
 func Load() (*Config, error) {
@@ -48,12 +58,22 @@ func Load() (*Config, error) {
 		PolygonChainID:  getEnvInt("POLYGON_CHAIN_ID", 137),
 		PolygonRPCURL:   getEnvString("POLYGON_RPC_URL", "https://polygon-rpc.com"),
 		DryRun:          getEnvBool("DRY_RUN", true),
-		MaxPositionSize: getEnvFloat("MAX_POSITION_SIZE", 10),
+		MaxPositionSize: getEnvFloat("MAX_POSITION_SIZE", 15),
 		SnipePrice:      getEnvFloat("SNIPE_PRICE", 0.99),
 		TriggerSeconds:  getEnvInt("TRIGGER_SECONDS", 1),
 		MinLiquidity:    getEnvFloat("MIN_LIQUIDITY", 5),
 		MinConfidence:   getEnvFloat("MIN_CONFIDENCE", 0.50),
 		MaxUncertainty:  getEnvFloat("MAX_UNCERTAINTY", 0.10),
+
+		// Black Swan defaults ($15 bankroll optimized)
+		BlackSwanMaxPrice:     getEnvFloat("BLACKSWAN_MAX_PRICE", 0.10),
+		BlackSwanMinPrice:     getEnvFloat("BLACKSWAN_MIN_PRICE", 0.005),
+		BlackSwanBetPercent:   getEnvFloat("BLACKSWAN_BET_PERCENT", 0.05),
+		BlackSwanMaxPositions: getEnvInt("BLACKSWAN_MAX_POSITIONS", 10),
+		BlackSwanMaxExposure:  getEnvFloat("BLACKSWAN_MAX_EXPOSURE", 10),
+		BlackSwanBidDiscount:  getEnvFloat("BLACKSWAN_BID_DISCOUNT", 0.25),
+		BlackSwanMinVolume:    getEnvFloat("BLACKSWAN_MIN_VOLUME", 100),
+		BlackSwanMaxVolume:    getEnvFloat("BLACKSWAN_MAX_VOLUME", 10000),
 	}
 
 	var missingFields []string

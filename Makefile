@@ -1,4 +1,4 @@
-.PHONY: build run run-dry scan approve test clean docker-build docker-run docker-logs docker-stop sports sports-dry
+.PHONY: build run run-dry scan approve test clean docker-build docker-run docker-logs docker-stop sports sports-dry blackswan blackswan-dry
 
 # Local development
 build:
@@ -7,6 +7,7 @@ build:
 	go build -o bin/scanner ./cmd/scanner
 	go build -o bin/approve ./cmd/approve
 	go build -o bin/sports ./cmd/sports
+	go build -o bin/blackswan ./cmd/blackswan
 
 run:
 	./bin/sniper
@@ -19,6 +20,12 @@ sports:
 
 sports-dry:
 	DRY_RUN=true ./bin/sports
+
+blackswan:
+	./bin/blackswan
+
+blackswan-dry:
+	DRY_RUN=true ./bin/blackswan
 
 scan:
 	./bin/scanner
