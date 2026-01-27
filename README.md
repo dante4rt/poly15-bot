@@ -1,21 +1,22 @@
 # Polymarket Trading Bot
 
-Three strategies for Polymarket prediction markets.
+Four strategies for Polymarket prediction markets.
 
 ## Strategies
 
-| Strategy          | Command          | Description                                                 |
-| ----------------- | ---------------- | ----------------------------------------------------------- |
-| **Black Swan**    | `make blackswan` | Buy low-probability events (1-10¢) with GTC limit orders.   |
-| **Sports**        | `make sports`    | Snipe NFL/NBA markets when outcome becomes certain.         |
-| **15-Min Crypto** | `make run`       | Snipe crypto up/down markets in final seconds. Low volume.  |
+| Strategy          | Command          | Description                                           |
+| ----------------- | ---------------- | ----------------------------------------------------- |
+| **Weather**       | `make weather`   | Exploit forecast/market price divergence. Daily edge. |
+| **Black Swan**    | `make blackswan` | Buy low-probability events (1-10¢) for 10x-1000x.     |
+| **Sports**        | `make sports`    | Snipe NFL/NBA when outcome becomes certain.           |
+| **15-Min Crypto** | `make run`       | Snipe crypto up/down in final seconds. Low volume.    |
 
 ## Quick Start
 
 ```bash
 cp .env.example .env   # Add your credentials
 make build
-make blackswan-dry     # Test Black Swan
+make weather-dry       # Test weather sniper
 make approve           # One-time USDC approval (before live trading)
 ```
 
@@ -30,43 +31,39 @@ CLOB_SECRET=...
 CLOB_PASSPHRASE=...
 ```
 
-## Proxy Wallet (if deposited via UI)
+## Proxy Wallet Setup
 
-If you deposited USDC through Polymarket's web UI, your funds are in a **proxy wallet** (Gnosis Safe), not your EOA. Find your proxy address in Polymarket settings:
-
-```env
-PROXY_WALLET_ADDRESS=0x...  # Your Polymarket proxy wallet
-```
-
-Run `make balance` to check balances and positions.
-
-## Black Swan Config
+If you deposited via Polymarket UI, funds are in a **proxy wallet**:
 
 ```env
-MAX_POSITION_SIZE=15        # Bankroll ($)
-BLACKSWAN_MAX_PRICE=0.10    # Max 10¢
-BLACKSWAN_MIN_PRICE=0.001   # Min 0.1¢ (extreme black swans)
-BLACKSWAN_BET_PERCENT=0.05  # 5% per bet
-BLACKSWAN_MAX_POSITIONS=10  # Max open orders
-BLACKSWAN_MAX_EXPOSURE=10   # Max $ at risk
-BLACKSWAN_BID_DISCOUNT=0.25 # Bid 25% below market
-BLACKSWAN_MAX_DAYS=30       # Max days to resolution (fast turnover)
+PROXY_WALLET_ADDRESS=0x...  # Find in Polymarket settings
+
+# Signature type (required for proxy wallet)
+# 1 = Email/Google login (Magic Link)
+# 2 = Browser wallet (MetaMask) [DEFAULT]
+SIGNATURE_TYPE=2
 ```
 
-Strategy finds trending markets ($1000+ 24hr volume) resolving within 30 days where one side is priced 0.1¢-10¢. Places limit orders 25% below market for potential 10x-1000x returns.
+Run `make balance` to verify.
 
 ## Commands
 
 ```bash
 make build         # Build all
-make balance       # Check USDC balance and positions
+make balance       # Check balances
 make approve       # USDC approval (one-time)
-make blackswan     # Black Swan (live)
-make blackswan-dry # Black Swan (dry run)
-make sports        # Sports sniper (live)
-make sports-dry    # Sports sniper (dry run)
-make run           # 15-min crypto (live)
-make run-dry       # 15-min crypto (dry run)
+
+# Live trading
+make weather       # Weather sniper
+make blackswan     # Black Swan hunter
+make sports        # Sports sniper
+make run           # 15-min crypto
+
+# Dry run (test mode)
+make weather-dry
+make blackswan-dry
+make sports-dry
+make run-dry
 ```
 
 ## Go Live
