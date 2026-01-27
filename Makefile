@@ -1,4 +1,4 @@
-.PHONY: build run run-dry scan approve balance test clean docker-build docker-run docker-logs docker-stop sports sports-dry blackswan blackswan-dry derive-creds
+.PHONY: build run run-dry scan approve balance test clean docker-build docker-run docker-logs docker-stop sports sports-dry blackswan blackswan-dry weather weather-dry derive-creds
 
 # Local development
 build:
@@ -9,6 +9,7 @@ build:
 	go build -o bin/balance ./cmd/balance
 	go build -o bin/sports ./cmd/sports
 	go build -o bin/blackswan ./cmd/blackswan
+	go build -o bin/weather ./cmd/weather
 	go build -o bin/derive-creds ./cmd/derive-creds
 
 run:
@@ -28,6 +29,12 @@ blackswan:
 
 blackswan-dry:
 	DRY_RUN=true ./bin/blackswan
+
+weather:
+	./bin/weather
+
+weather-dry:
+	DRY_RUN=true ./bin/weather
 
 scan:
 	./bin/scanner

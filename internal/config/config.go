@@ -51,6 +51,19 @@ type Config struct {
 	BlackSwanMinVolume    float64 // Minimum market volume to consider (default: 100)
 	BlackSwanMaxVolume    float64 // Maximum market volume (avoid liquid markets) (default: 10000)
 	BlackSwanMaxDays      int     // Maximum days until resolution (default: 30) - prefer fast-resolving markets
+
+	// Weather sniper strategy parameters ($15 bankroll optimized)
+	WeatherBankroll       float64 // Total bankroll for weather trading (default: 15)
+	WeatherMinEdge        float64 // Minimum edge to trade (default: 0.10 = 10%)
+	WeatherMinConfidence  float64 // Minimum confidence in forecast (default: 0.70 = 70%)
+	WeatherMaxPosition    float64 // Maximum position size per trade (default: 0.30 = $0.30)
+	WeatherBetPercent     float64 // Bankroll percentage per bet (default: 0.02 = 2%)
+	WeatherDailyLossLimit float64 // Daily loss limit (default: 1.50 = $1.50)
+	WeatherMaxTrades      int     // Maximum concurrent trades (default: 10)
+	WeatherMaxExposure    float64 // Maximum total exposure (default: 3.00 = $3.00)
+	WeatherMinVolume      float64 // Minimum market volume (default: 500)
+	WeatherMaxSpread      float64 // Maximum bid-ask spread (default: 0.05 = 5%)
+	WeatherBidDiscount    float64 // How far below market to bid (default: 0.12 = 12%)
 }
 
 func Load() (*Config, error) {
@@ -82,6 +95,19 @@ func Load() (*Config, error) {
 		BlackSwanMinVolume:    getEnvFloat("BLACKSWAN_MIN_VOLUME", 100),
 		BlackSwanMaxVolume:    getEnvFloat("BLACKSWAN_MAX_VOLUME", 10000),
 		BlackSwanMaxDays:      getEnvInt("BLACKSWAN_MAX_DAYS", 30), // Prefer markets resolving within 30 days
+
+		// Weather sniper defaults ($15 bankroll optimized)
+		WeatherBankroll:       getEnvFloat("WEATHER_BANKROLL", 15),
+		WeatherMinEdge:        getEnvFloat("WEATHER_MIN_EDGE", 0.10),        // 10% minimum edge
+		WeatherMinConfidence:  getEnvFloat("WEATHER_MIN_CONFIDENCE", 0.70), // 70% confidence
+		WeatherMaxPosition:    getEnvFloat("WEATHER_MAX_POSITION", 0.30),   // $0.30 max per trade
+		WeatherBetPercent:     getEnvFloat("WEATHER_BET_PERCENT", 0.02),    // 2% of bankroll
+		WeatherDailyLossLimit: getEnvFloat("WEATHER_DAILY_LOSS_LIMIT", 1.50),
+		WeatherMaxTrades:      getEnvInt("WEATHER_MAX_TRADES", 10),
+		WeatherMaxExposure:    getEnvFloat("WEATHER_MAX_EXPOSURE", 3.00),
+		WeatherMinVolume:      getEnvFloat("WEATHER_MIN_VOLUME", 500),
+		WeatherMaxSpread:      getEnvFloat("WEATHER_MAX_SPREAD", 0.05), // 5% max spread
+		WeatherBidDiscount:    getEnvFloat("WEATHER_BID_DISCOUNT", 0.12),
 	}
 
 	var missingFields []string
