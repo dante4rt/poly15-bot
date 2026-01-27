@@ -75,5 +75,3 @@ DRY_RUN=false
 ## License
 
 MIT
-
-# Auto-learnings test
