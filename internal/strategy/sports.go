@@ -70,7 +70,7 @@ func NewSportsSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*S
 	// Create order builder - use proxy wallet if configured
 	var builder *clob.OrderBuilder
 	if cfg.UseProxyWallet() {
-		builder = clob.NewOrderBuilderWithProxy(w, cfg.CLOBApiKey, common.HexToAddress(cfg.ProxyWalletAddress))
+		builder = clob.NewOrderBuilderWithProxy(w, cfg.CLOBApiKey, common.HexToAddress(cfg.ProxyWalletAddress), cfg.SignatureType)
 	} else {
 		builder = clob.NewOrderBuilder(w, cfg.CLOBApiKey)
 	}

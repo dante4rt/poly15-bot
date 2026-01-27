@@ -34,7 +34,7 @@ type OrderBuilder struct {
 	signerAddr       common.Address   // The EOA that signs orders
 	apiKey           string           // API key used as owner for orders
 	nonce            *big.Int
-	useProxyWallet   bool             // True if using Gnosis Safe proxy wallet
+	signatureType    uint8            // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
 }
 
 // NewOrderBuilder creates a new OrderBuilder with the given wallet and API key.
@@ -43,30 +43,39 @@ func NewOrderBuilder(w *wallet.Wallet, apiKey string) *OrderBuilder {
 	signer := wallet.NewSigner(w)
 	negRiskSigner := wallet.NewSignerWithConfig(w, wallet.ChainID, wallet.NegRiskExchangeContract)
 	return &OrderBuilder{
-		signer:         signer,
-		negRiskSigner:  negRiskSigner,
-		maker:          w.Address(),
-		signerAddr:     w.Address(),
-		apiKey:         apiKey,
-		nonce:          big.NewInt(0),
-		useProxyWallet: false,
+		signer:        signer,
+		negRiskSigner: negRiskSigner,
+		maker:         w.Address(),
+		signerAddr:    w.Address(),
+		apiKey:        apiKey,
+		nonce:         big.NewInt(0),
+		signatureType: wallet.SignatureTypeEOA, // Type 0
 	}
 }
 
 // NewOrderBuilderWithProxy creates an OrderBuilder that uses a Polymarket proxy wallet.
 // The proxyWalletAddress is the Gnosis Safe address that holds the user's funds.
-// Orders are signed by the EOA but use signature type 1 (Poly).
-func NewOrderBuilderWithProxy(w *wallet.Wallet, apiKey string, proxyWalletAddress common.Address) *OrderBuilder {
+// signatureType should be:
+//   - 1 (POLY_PROXY) for Magic Link email/Google login accounts
+//   - 2 (GNOSIS_SAFE) for browser wallet (MetaMask) connected accounts
+func NewOrderBuilderWithProxy(w *wallet.Wallet, apiKey string, proxyWalletAddress common.Address, signatureType int) *OrderBuilder {
 	signer := wallet.NewSigner(w)
 	negRiskSigner := wallet.NewSignerWithConfig(w, wallet.ChainID, wallet.NegRiskExchangeContract)
+
+	// Validate signature type, default to GNOSIS_SAFE if invalid
+	sigType := uint8(signatureType)
+	if sigType > 2 {
+		sigType = wallet.SignatureTypePolyGnosis // Default to type 2
+	}
+
 	return &OrderBuilder{
-		signer:         signer,
-		negRiskSigner:  negRiskSigner,
-		maker:          proxyWalletAddress, // The proxy wallet is the maker/funder
-		signerAddr:     w.Address(),        // The EOA signs the orders
-		apiKey:         apiKey,
-		nonce:          big.NewInt(0),
-		useProxyWallet: true,
+		signer:        signer,
+		negRiskSigner: negRiskSigner,
+		maker:         proxyWalletAddress, // The proxy wallet is the maker/funder
+		signerAddr:    w.Address(),        // The EOA signs the orders
+		apiKey:        apiKey,
+		nonce:         big.NewInt(0),
+		signatureType: sigType,
 	}
 }
 
@@ -185,16 +194,11 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 		return nil, fmt.Errorf("invalid token ID: %s", params.TokenID)
 	}
 
-	// Determine signature type based on wallet mode
-	// Type 0 (EOA): Direct wallet
-	// Type 1 (Poly): Polymarket proxy wallet (created via UI deposit)
-	// Type 2 (PolyGnosis): Gnosis Safe multisig (rare)
-	var sigType uint8
-	if b.useProxyWallet {
-		sigType = wallet.SignatureTypePoly // Use type 1 for Polymarket proxy wallets
-	} else {
-		sigType = wallet.SignatureTypeEOA
-	}
+	// Use the signature type configured for this builder
+	// Type 0 (EOA): Standalone wallet
+	// Type 1 (POLY_PROXY): Polymarket email/Google login
+	// Type 2 (GNOSIS_SAFE): Browser wallet (MetaMask) connected to Polymarket
+	sigType := b.signatureType
 
 	// Build the order struct for signing
 	// For proxy wallet: maker = proxy wallet, signer = EOA

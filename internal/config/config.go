@@ -14,6 +14,7 @@ type Config struct {
 	// Wallet
 	PrivateKey         string
 	ProxyWalletAddress string // Polymarket proxy wallet (Gnosis Safe), empty = EOA mode
+	SignatureType      int    // 0=EOA, 1=POLY_PROXY (email/Google), 2=GNOSIS_SAFE (browser wallet)
 	PolygonChainID     int
 	PolygonRPCURL      string
 
@@ -157,6 +158,18 @@ func Load() (*Config, error) {
 
 	// Optional proxy wallet (Gnosis Safe)
 	cfg.ProxyWalletAddress = os.Getenv("PROXY_WALLET_ADDRESS")
+
+	// Signature type: 0=EOA, 1=POLY_PROXY (email/Google login), 2=GNOSIS_SAFE (browser wallet)
+	// Default to 2 (GNOSIS_SAFE) if proxy wallet is set, as most users connect via browser wallet
+	if sigTypeStr := os.Getenv("SIGNATURE_TYPE"); sigTypeStr != "" {
+		sigType, err := strconv.Atoi(sigTypeStr)
+		if err != nil || sigType < 0 || sigType > 2 {
+			return nil, fmt.Errorf("invalid SIGNATURE_TYPE: must be 0, 1, or 2")
+		}
+		cfg.SignatureType = sigType
+	} else if cfg.ProxyWalletAddress != "" {
+		cfg.SignatureType = 2 // Default to GNOSIS_SAFE for browser wallet connections
+	}
 
 	return cfg, nil
 }
