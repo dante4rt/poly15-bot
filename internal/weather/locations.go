@@ -38,6 +38,17 @@ type Location struct {
 	Longitude  float64
 	TimezoneID string             // IANA timezone (e.g., "America/New_York")
 	Tier       PredictabilityTier // Forecast reliability tier
+	Models     []WeatherModel     // Preferred weather models for this location (best first)
+}
+
+// GetPreferredModels returns the best weather models for this location.
+// Falls back to ECMWF + GFS if no specific models configured.
+func (l *Location) GetPreferredModels() []WeatherModel {
+	if len(l.Models) > 0 {
+		return l.Models
+	}
+	// Default fallback: ECMWF (#1 worldwide) + GFS (good global)
+	return []WeatherModel{ModelECMWF, ModelGFS}
 }
 
 // AllCities contains all cities we track for weather markets (US + International).
@@ -53,7 +64,8 @@ var AllCities = []Location{
 		Latitude:   51.5074,
 		Longitude:  -0.1278,
 		TimezoneID: "Europe/London",
-		Tier:       TierS, // UK Met Office UKV 1.5km - best in world
+		Tier:       TierS,
+		Models:     []WeatherModel{ModelUKMO, ModelICONEU, ModelECMWF}, // UK Met Office #1
 	},
 	{
 		Name:       "Dallas",
@@ -61,7 +73,8 @@ var AllCities = []Location{
 		Latitude:   32.7767,
 		Longitude:  -96.7970,
 		TimezoneID: "America/Chicago",
-		Tier:       TierS, // Flat terrain, HRRR excels
+		Tier:       TierS,
+		Models:     []WeatherModel{ModelHRRR, ModelGFS, ModelECMWF}, // HRRR best for flat Texas
 	},
 	{
 		Name:       "Atlanta",
@@ -69,7 +82,8 @@ var AllCities = []Location{
 		Latitude:   33.7490,
 		Longitude:  -84.3880,
 		TimezoneID: "America/New_York",
-		Tier:       TierS, // Inland, stable SE patterns, HRRR/NAM strong
+		Tier:       TierS,
+		Models:     []WeatherModel{ModelHRRR, ModelGFS, ModelECMWF}, // HRRR 3km, excellent for SE US
 	},
 	{
 		Name:       "Houston",
@@ -77,7 +91,8 @@ var AllCities = []Location{
 		Latitude:   29.7604,
 		Longitude:  -95.3698,
 		TimezoneID: "America/Chicago",
-		Tier:       TierS, // Flat Texas, good models
+		Tier:       TierS,
+		Models:     []WeatherModel{ModelHRRR, ModelGFS, ModelECMWF}, // HRRR best for flat Texas
 	},
 	{
 		Name:       "Phoenix",
@@ -85,7 +100,8 @@ var AllCities = []Location{
 		Latitude:   33.4484,
 		Longitude:  -112.0740,
 		TimezoneID: "America/Phoenix",
-		Tier:       TierS, // Desert = very predictable
+		Tier:       TierS,
+		Models:     []WeatherModel{ModelHRRR, ModelGFS, ModelECMWF}, // Desert = all models agree
 	},
 	{
 		Name:       "Las Vegas",
@@ -93,7 +109,8 @@ var AllCities = []Location{
 		Latitude:   36.1699,
 		Longitude:  -115.1398,
 		TimezoneID: "America/Los_Angeles",
-		Tier:       TierS, // Desert, stable patterns
+		Tier:       TierS,
+		Models:     []WeatherModel{ModelHRRR, ModelGFS, ModelECMWF}, // Desert, stable
 	},
 	// ═══════════════════════════════════════════════════════════════════
 	// TIER A - Good predictability (reliable models, some variability)
@@ -104,7 +121,8 @@ var AllCities = []Location{
 		Latitude:   40.7128,
 		Longitude:  -74.0060,
 		TimezoneID: "America/New_York",
-		Tier:       TierA, // Good coverage but coastal, nor'easters
+		Tier:       TierA,
+		Models:     []WeatherModel{ModelHRRR, ModelGFS, ModelECMWF}, // HRRR 3km best 0-18h
 	},
 	{
 		Name:       "Seoul",
@@ -112,7 +130,8 @@ var AllCities = []Location{
 		Latitude:   37.5665,
 		Longitude:  126.9780,
 		TimezoneID: "Asia/Seoul",
-		Tier:       TierA, // KMA local model, continental
+		Tier:       TierA,
+		Models:     []WeatherModel{ModelKMA, ModelECMWF, ModelGFS}, // KMA (via JMA) best for Korea
 	},
 	{
 		Name:       "Chicago",
@@ -187,7 +206,8 @@ var AllCities = []Location{
 		Latitude:   47.6062,
 		Longitude:  -122.3321,
 		TimezoneID: "America/Los_Angeles",
-		Tier:       TierB, // Pacific maritime, Cascade mountains
+		Tier:       TierB,
+		Models:     []WeatherModel{ModelHRRR, ModelECMWF, ModelGFS}, // HRRR handles terrain fairly well
 	},
 	{
 		Name:       "Toronto",
@@ -195,7 +215,8 @@ var AllCities = []Location{
 		Latitude:   43.6532,
 		Longitude:  -79.3832,
 		TimezoneID: "America/Toronto",
-		Tier:       TierB, // Lake Ontario effect, changeable
+		Tier:       TierB,
+		Models:     []WeatherModel{ModelGEM, ModelHRRR, ModelGFS}, // GEM (Environment Canada) best
 	},
 	{
 		Name:       "Denver",

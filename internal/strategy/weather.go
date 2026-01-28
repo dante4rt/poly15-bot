@@ -372,14 +372,39 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 			daysAhead = 7 // Open-Meteo limit
 		}
 
-		forecast, err := ws.weather.GetForecast(location, wm.ResolutionDate)
+		// Use multi-model consensus forecast for better accuracy
+		consensus, err := ws.weather.GetConsensusForecast(location, wm.ResolutionDate)
 		if err != nil {
-			log.Printf("[weather] failed to get forecast for %s: %v", wm.Location, err)
+			// Fallback to single forecast if consensus fails
+			forecast, err := ws.weather.GetForecast(location, wm.ResolutionDate)
+			if err != nil {
+				log.Printf("[weather] failed to get forecast for %s: %v", wm.Location, err)
+				continue
+			}
+			opp := ws.evaluateOpportunity(wm, forecast, daysAhead, 0.5) // Lower agreement = less confident
+			if opp != nil {
+				opportunities = append(opportunities, opp)
+			}
 			continue
 		}
 
-		// Calculate probability based on market type
-		opp := ws.evaluateOpportunity(wm, forecast, daysAhead)
+		// Skip if models disagree too much (agreement < 0.5 means >5°C spread)
+		if consensus.Agreement < 0.5 {
+			log.Printf("[weather] skipping %s: models disagree (agreement=%.0f%%, spread=%.1f°C)",
+				wm.Location, consensus.Agreement*100, consensus.TempHighSpread)
+			continue
+		}
+
+		// Log model consensus
+		if len(consensus.Models) > 1 {
+			log.Printf("[weather] %s: %d models agree (%.0f%%), high=%.1f°C±%.1f°C",
+				wm.Location, len(consensus.Models), consensus.Agreement*100,
+				consensus.AvgTempHigh, consensus.TempHighSpread/2)
+		}
+
+		// Calculate probability based on market type using consensus forecast
+		forecast := consensus.BestForecast()
+		opp := ws.evaluateOpportunity(wm, forecast, daysAhead, consensus.Agreement)
 		if opp != nil {
 			opportunities = append(opportunities, opp)
 		}
@@ -389,7 +414,8 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 }
 
 // evaluateOpportunity calculates edge for a weather market opportunity.
-func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *weather.Forecast, daysAhead int) *WeatherOpportunity {
+// modelAgreement is 0-1 indicating how much weather models agree (1 = perfect agreement).
+func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *weather.Forecast, daysAhead int, modelAgreement float64) *WeatherOpportunity {
 	var ourProbYes float64
 	var confidence float64
 
@@ -420,6 +446,13 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 
 	default:
 		return nil
+	}
+
+	// Factor in model agreement: when models agree, boost confidence
+	// modelAgreement=1.0 → no change, modelAgreement=0.5 → 25% reduction
+	if modelAgreement > 0 {
+		agreementFactor := 0.5 + 0.5*modelAgreement
+		confidence *= agreementFactor
 	}
 
 	// Skip if confidence too low
@@ -488,8 +521,8 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 
 	score := edge * confidence * 100 * timeBonus * volumeBonus * tierBonus
 
-	log.Printf("[weather] opportunity: %s - %s side, edge=%.1f%%, confidence=%.0f%%, tier=%s, score=%.1f",
-		wm.Market.Question[:minInt(50, len(wm.Market.Question))], side, edge*100, confidence*100, tierStr, score)
+	log.Printf("[weather] opportunity: %s - %s side, edge=%.1f%%, confidence=%.0f%%, tier=%s, models=%.0f%%, score=%.1f",
+		wm.Market.Question[:minInt(50, len(wm.Market.Question))], side, edge*100, confidence*100, tierStr, modelAgreement*100, score)
 
 	return &WeatherOpportunity{
 		WeatherMarket:  wm,

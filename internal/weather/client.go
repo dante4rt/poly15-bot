@@ -13,6 +13,40 @@ const (
 	defaultTimeout   = 30 * time.Second
 )
 
+// WeatherModel represents a specific weather prediction model.
+type WeatherModel string
+
+const (
+	ModelBestMatch WeatherModel = ""                     // Open-Meteo default best match
+	ModelECMWF     WeatherModel = "ecmwf_ifs04"          // ECMWF global - #1 worldwide
+	ModelGFS       WeatherModel = "gfs_seamless"         // NOAA GFS - good global coverage
+	ModelHRRR      WeatherModel = "gfs_hrrr"             // NOAA HRRR - best for US, 3km resolution
+	ModelICON      WeatherModel = "icon_seamless"        // DWD ICON - best for Europe
+	ModelICONEU    WeatherModel = "icon_eu"              // DWD ICON-EU - 7km Europe
+	ModelUKMO      WeatherModel = "ukmo_seamless"        // UK Met Office - best for London
+	ModelGEM       WeatherModel = "gem_seamless"         // Environment Canada - best for Toronto
+	ModelKMA       WeatherModel = "jma_seamless"         // Korea/Japan regional
+	ModelAROME     WeatherModel = "meteofrance_seamless" // Météo-France AROME
+)
+
+// ModelForecast contains a forecast from a specific model.
+type ModelForecast struct {
+	Model    WeatherModel
+	Forecast *Forecast
+}
+
+// ConsensusForecast contains forecasts from multiple models with agreement metrics.
+type ConsensusForecast struct {
+	Location       string
+	Date           time.Time
+	Models         []ModelForecast
+	AvgTempHigh    float64 // Average high across models
+	AvgTempLow     float64 // Average low across models
+	TempHighSpread float64 // Max - Min high temp (model disagreement)
+	TempLowSpread  float64 // Max - Min low temp (model disagreement)
+	Agreement      float64 // 0-1, how much models agree (1 = perfect agreement)
+}
+
 // Client fetches weather data from Open-Meteo (free, no auth required).
 type Client struct {
 	httpClient *http.Client
@@ -29,20 +63,20 @@ func NewClient() *Client {
 
 // Forecast represents weather forecast data for a location.
 type Forecast struct {
-	Location    string
-	Latitude    float64
-	Longitude   float64
-	Date        time.Time
-	TempHigh    float64 // Celsius
-	TempLow     float64 // Celsius
-	TempMean    float64 // Celsius (average)
-	RainProb    float64 // 0-100 (percentage)
-	SnowProb    float64 // 0-100 (percentage)
-	Snowfall    float64 // cm
-	WindSpeed   float64 // km/h max
-	Humidity    int     // 0-100 (percentage)
-	CloudCover  int     // 0-100 (percentage)
-	UVIndex     float64
+	Location   string
+	Latitude   float64
+	Longitude  float64
+	Date       time.Time
+	TempHigh   float64 // Celsius
+	TempLow    float64 // Celsius
+	TempMean   float64 // Celsius (average)
+	RainProb   float64 // 0-100 (percentage)
+	SnowProb   float64 // 0-100 (percentage)
+	Snowfall   float64 // cm
+	WindSpeed  float64 // km/h max
+	Humidity   int     // 0-100 (percentage)
+	CloudCover int     // 0-100 (percentage)
+	UVIndex    float64
 }
 
 // CelsiusToFahrenheit converts Celsius to Fahrenheit.
@@ -214,4 +248,153 @@ type openMeteoResponse struct {
 		CloudCoverMean       []float64 `json:"cloud_cover_mean"`
 		UVIndexMax           []float64 `json:"uv_index_max"`
 	} `json:"daily"`
+}
+
+// GetForecastWithModel fetches forecast using a specific weather model.
+func (c *Client) GetForecastWithModel(loc *Location, date time.Time, model WeatherModel) (*Forecast, error) {
+	params := url.Values{}
+	params.Set("latitude", fmt.Sprintf("%.4f", loc.Latitude))
+	params.Set("longitude", fmt.Sprintf("%.4f", loc.Longitude))
+	params.Set("daily", "temperature_2m_max,temperature_2m_min,precipitation_probability_max,snowfall_sum,wind_speed_10m_max,relative_humidity_2m_mean,cloud_cover_mean,uv_index_max")
+	params.Set("temperature_unit", "celsius")
+	params.Set("timezone", loc.TimezoneID)
+	params.Set("forecast_days", "7")
+
+	// Add model parameter if specified
+	if model != ModelBestMatch && model != "" {
+		params.Set("models", string(model))
+	}
+
+	endpoint := fmt.Sprintf("%s/forecast?%s", c.baseURL, params.Encode())
+
+	resp, err := c.httpClient.Get(endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch forecast: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("Open-Meteo API returned status %d for model %s", resp.StatusCode, model)
+	}
+
+	var data openMeteoResponse
+	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
+		return nil, fmt.Errorf("failed to parse Open-Meteo response: %w", err)
+	}
+
+	targetDate := date.Format("2006-01-02")
+	for i, d := range data.Daily.Time {
+		if d == targetDate {
+			return c.buildForecast(loc, data, i, date)
+		}
+	}
+
+	return nil, fmt.Errorf("no forecast available for %s", targetDate)
+}
+
+// GetConsensusForecast fetches forecasts from multiple models and computes agreement.
+func (c *Client) GetConsensusForecast(loc *Location, date time.Time) (*ConsensusForecast, error) {
+	models := loc.GetPreferredModels()
+	if len(models) == 0 {
+		// Default to ECMWF + GFS if no specific models
+		models = []WeatherModel{ModelECMWF, ModelGFS}
+	}
+
+	consensus := &ConsensusForecast{
+		Location: loc.Name,
+		Date:     date,
+		Models:   make([]ModelForecast, 0, len(models)),
+	}
+
+	var tempHighSum, tempLowSum float64
+	var tempHighMin, tempHighMax float64 = 999, -999
+	var tempLowMin, tempLowMax float64 = 999, -999
+	successCount := 0
+
+	for _, model := range models {
+		forecast, err := c.GetForecastWithModel(loc, date, model)
+		if err != nil {
+			// Log but continue - some models may not have data for all locations
+			continue
+		}
+
+		consensus.Models = append(consensus.Models, ModelForecast{
+			Model:    model,
+			Forecast: forecast,
+		})
+
+		tempHighSum += forecast.TempHigh
+		tempLowSum += forecast.TempLow
+
+		if forecast.TempHigh < tempHighMin {
+			tempHighMin = forecast.TempHigh
+		}
+		if forecast.TempHigh > tempHighMax {
+			tempHighMax = forecast.TempHigh
+		}
+		if forecast.TempLow < tempLowMin {
+			tempLowMin = forecast.TempLow
+		}
+		if forecast.TempLow > tempLowMax {
+			tempLowMax = forecast.TempLow
+		}
+
+		successCount++
+	}
+
+	if successCount == 0 {
+		return nil, fmt.Errorf("no models returned data for %s on %s", loc.Name, date.Format("2006-01-02"))
+	}
+
+	// Calculate averages and spreads
+	consensus.AvgTempHigh = tempHighSum / float64(successCount)
+	consensus.AvgTempLow = tempLowSum / float64(successCount)
+	consensus.TempHighSpread = tempHighMax - tempHighMin
+	consensus.TempLowSpread = tempLowMax - tempLowMin
+
+	// Calculate agreement score (1.0 = perfect agreement, 0.0 = high disagreement)
+	// Agreement decreases as spread increases
+	// A spread of 0°C = 1.0 agreement
+	// A spread of 5°C = 0.5 agreement
+	// A spread of 10°C+ = 0.0 agreement
+	maxSpread := consensus.TempHighSpread
+	if consensus.TempLowSpread > maxSpread {
+		maxSpread = consensus.TempLowSpread
+	}
+	consensus.Agreement = 1.0 - (maxSpread / 10.0)
+	if consensus.Agreement < 0 {
+		consensus.Agreement = 0
+	}
+
+	return consensus, nil
+}
+
+// BestForecast returns the most reliable forecast from consensus.
+// Uses average of models when they agree, primary model when they disagree.
+func (cf *ConsensusForecast) BestForecast() *Forecast {
+	if len(cf.Models) == 0 {
+		return nil
+	}
+
+	// If good agreement, return average
+	if cf.Agreement >= 0.7 {
+		f := cf.Models[0].Forecast
+		return &Forecast{
+			Location:  cf.Location,
+			Latitude:  f.Latitude,
+			Longitude: f.Longitude,
+			Date:      cf.Date,
+			TempHigh:  cf.AvgTempHigh,
+			TempLow:   cf.AvgTempLow,
+			TempMean:  (cf.AvgTempHigh + cf.AvgTempLow) / 2,
+			RainProb:  f.RainProb,
+			SnowProb:  f.SnowProb,
+			Snowfall:  f.Snowfall,
+			WindSpeed: f.WindSpeed,
+			Humidity:  f.Humidity,
+		}
+	}
+
+	// If disagreement, return first (primary) model
+	return cf.Models[0].Forecast
 }
