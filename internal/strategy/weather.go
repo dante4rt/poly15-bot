@@ -475,26 +475,38 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 	var tokenID string
 	var bidPrice float64
 
-	// Minimum price to avoid rounding to 0 (tick size is 0.001)
-	const minBidPrice = 0.001
+	// Minimum tick size on Polymarket
+	const minTickSize = 0.001
+	// Minimum price to place a non-marketable limit order (must be at least 2 ticks)
+	const minLimitOrderPrice = 0.002
 
 	if edgeYes >= edgeNo && edgeYes >= ws.config.WeatherMinEdge {
 		side = "yes"
 		edge = edgeYes
 		ev = evYes
 		tokenID = wm.YesTokenID
-		bidPrice = wm.YesPrice * (1 - ws.config.WeatherBidDiscount) // Bid below market
-		if bidPrice < minBidPrice {
-			bidPrice = minBidPrice // Ensure minimum tick size
+		if wm.YesPrice < minLimitOrderPrice {
+			// Market price too low for limit order - use market price (will be marketable)
+			// Marketable orders require $1 minimum, handled in PlaceTrade
+			bidPrice = wm.YesPrice
+		} else {
+			bidPrice = wm.YesPrice * (1 - ws.config.WeatherBidDiscount) // Bid below market
+			if bidPrice < minTickSize {
+				bidPrice = minTickSize
+			}
 		}
 	} else if edgeNo > edgeYes && edgeNo >= ws.config.WeatherMinEdge {
 		side = "no"
 		edge = edgeNo
 		ev = evNo
 		tokenID = wm.NoTokenID
-		bidPrice = wm.NoPrice * (1 - ws.config.WeatherBidDiscount)
-		if bidPrice < minBidPrice {
-			bidPrice = minBidPrice
+		if wm.NoPrice < minLimitOrderPrice {
+			bidPrice = wm.NoPrice
+		} else {
+			bidPrice = wm.NoPrice * (1 - ws.config.WeatherBidDiscount)
+			if bidPrice < minTickSize {
+				bidPrice = minTickSize
+			}
 		}
 	} else {
 		// No significant edge
@@ -583,16 +595,31 @@ func (ws *WeatherSniper) calculateConfidence(dist *weather.TempDistribution, thr
 
 // PlaceTrade places a limit order for a weather opportunity.
 func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
+	// Determine if this will be a marketable order (price too low for limit order)
+	// Marketable orders require $1 minimum on Polymarket
+	const minMarketableOrderSize = 1.0
+	const minLimitOrderPrice = 0.002
+	isMarketable := opp.BidPrice < minLimitOrderPrice
+
 	// Calculate bet amount (% of bankroll, capped by max position)
 	betAmount := ws.bankroll * ws.config.WeatherBetPercent
 	if betAmount > ws.config.WeatherMaxPosition {
 		betAmount = ws.config.WeatherMaxPosition
 	}
 
+	// Enforce $1 minimum for marketable orders
+	if isMarketable && betAmount < minMarketableOrderSize {
+		betAmount = minMarketableOrderSize
+		log.Printf("[weather] marketable order: increasing bet to $%.2f minimum", betAmount)
+	}
+
 	// Check exposure limits
 	currentExposure := ws.tracker.TotalExposure()
 	if currentExposure+betAmount > ws.config.WeatherMaxExposure {
 		betAmount = ws.config.WeatherMaxExposure - currentExposure
+		if isMarketable && betAmount < minMarketableOrderSize {
+			return fmt.Errorf("insufficient exposure for marketable order (need $%.2f, have $%.2f)", minMarketableOrderSize, betAmount)
+		}
 		if betAmount < 0.01 {
 			return fmt.Errorf("insufficient exposure remaining")
 		}
@@ -600,11 +627,6 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 
 	// Calculate shares
 	shares := betAmount / opp.BidPrice
-	const minShares = 5.0
-	if shares < minShares {
-		shares = minShares
-		betAmount = shares * opp.BidPrice
-	}
 
 	log.Printf("[weather] placing %s trade: %s @ $%.4f, shares=%.1f, cost=$%.2f, edge=%.1f%%",
 		opp.Side, opp.WeatherMarket.Market.Question[:minInt(40, len(opp.WeatherMarket.Market.Question))],
