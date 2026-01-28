@@ -516,10 +516,10 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 	var tokenID string
 	var bidPrice float64
 
-	// Minimum tick size on Polymarket
-	const minTickSize = 0.001
+	// Polymarket price rules: minimum tick size is $0.01 (1 cent)
+	const minTickSize = 0.01
 	// Minimum price to place a non-marketable limit order (must be at least 2 ticks)
-	const minLimitOrderPrice = 0.002
+	const minLimitOrderPrice = 0.02
 
 	if edgeYes >= edgeNo && edgeYes >= ws.config.WeatherMinEdge {
 		side = "yes"
@@ -529,9 +529,9 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		if wm.YesPrice < minLimitOrderPrice {
 			// Market price too low for limit order - use market price (will be marketable)
 			// Marketable orders require $1 minimum, handled in PlaceTrade
-			bidPrice = wm.YesPrice
+			bidPrice = roundToTick(wm.YesPrice, minTickSize)
 		} else {
-			bidPrice = wm.YesPrice * (1 - ws.config.WeatherBidDiscount) // Bid below market
+			bidPrice = roundToTick(wm.YesPrice*(1-ws.config.WeatherBidDiscount), minTickSize) // Bid below market
 			if bidPrice < minTickSize {
 				bidPrice = minTickSize
 			}
@@ -542,9 +542,9 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		ev = evNo
 		tokenID = wm.NoTokenID
 		if wm.NoPrice < minLimitOrderPrice {
-			bidPrice = wm.NoPrice
+			bidPrice = roundToTick(wm.NoPrice, minTickSize)
 		} else {
-			bidPrice = wm.NoPrice * (1 - ws.config.WeatherBidDiscount)
+			bidPrice = roundToTick(wm.NoPrice*(1-ws.config.WeatherBidDiscount), minTickSize)
 			if bidPrice < minTickSize {
 				bidPrice = minTickSize
 			}
@@ -680,10 +680,10 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 		}
 	}
 
-	// Calculate shares
-	shares := betAmount / opp.BidPrice
+	// Calculate shares (round to 4 decimal places for Polymarket precision)
+	shares := roundShares(betAmount / opp.BidPrice)
 
-	log.Printf("[weather] placing %s trade: %s @ $%.4f, shares=%.1f, cost=$%.2f, edge=%.1f%%",
+	log.Printf("[weather] placing %s trade: %s @ $%.2f, shares=%.4f, cost=$%.2f, edge=%.1f%%",
 		opp.Side, opp.WeatherMarket.Market.Question[:minInt(40, len(opp.WeatherMarket.Market.Question))],
 		opp.BidPrice, shares, betAmount, opp.Edge*100)
 
@@ -893,4 +893,14 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// roundToTick rounds a price to the nearest tick size (e.g., 0.01 for cents).
+func roundToTick(price, tickSize float64) float64 {
+	return float64(int(price/tickSize+0.5)) * tickSize
+}
+
+// roundShares rounds shares to 4 decimal places (Polymarket maker amount precision).
+func roundShares(shares float64) float64 {
+	return float64(int(shares*10000+0.5)) / 10000
 }

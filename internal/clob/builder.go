@@ -18,8 +18,8 @@ const (
 	defaultFeeRateBps = 0
 	// Default expiration (1 hour from now)
 	defaultExpirationSeconds = 3600
-	// Tick size for prices (0.001)
-	tickSize = 0.001
+	// Tick size for prices - Polymarket minimum is 1 cent (0.01)
+	tickSize = 0.01
 )
 
 // OrderBuilder constructs and signs orders for the CLOB.
@@ -315,7 +315,7 @@ func generateSalt() (*big.Int, error) {
 	return salt, nil
 }
 
-// roundToTickSize rounds a price to the nearest tick size (0.001).
+// roundToTickSize rounds a price to the nearest tick size (0.01 = 1 cent).
 // This ensures the price is valid for Polymarket's tick size rules.
 func roundToTickSize(price float64) float64 {
 	return math.Round(price/tickSize) * tickSize
