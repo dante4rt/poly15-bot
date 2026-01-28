@@ -20,7 +20,6 @@ const (
 	blackSwanScanInterval   = 5 * time.Minute  // Scan for new markets every 5 minutes
 	blackSwanCheckInterval  = 30 * time.Second // Check positions every 30 seconds
 	blackSwanStatusInterval = 2 * time.Minute  // Log status every 2 minutes
-	orderRefreshInterval    = 1 * time.Hour    // Refresh stale orders
 	maxOrderAge             = 24 * time.Hour   // Cancel orders older than this
 )
 

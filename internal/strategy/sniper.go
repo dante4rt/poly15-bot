@@ -23,15 +23,14 @@ const (
 	cleanupInterval = 1 * time.Minute
 
 	// Winner detection thresholds
-	minWinnerConfidence = 0.50  // Minimum price to consider a clear winner (per strategy: >50%)
-	maxUncertaintyGap   = 0.10  // If YES and NO bids are within this range, too risky
-	maxSpreadPercent    = 0.05  // Maximum spread as percentage of price (5%)
-	defaultMinLiquidity = 5.0   // Default minimum size in USD at best ask
-	momentumThreshold   = 0.15  // Price jump threshold for momentum signal
+	minWinnerConfidence = 0.50 // Minimum price to consider a clear winner (per strategy: >50%)
+	maxUncertaintyGap   = 0.10 // If YES and NO bids are within this range, too risky
+	defaultMinLiquidity = 5.0  // Default minimum size in USD at best ask
+	momentumThreshold   = 0.15 // Price jump threshold for momentum signal
 
 	// Risk management
-	defaultMaxLossPerTrade = 5.0   // Maximum loss per trade in USD
-	defaultDailyLossLimit  = 50.0  // Maximum daily loss in USD
+	defaultMaxLossPerTrade = 5.0  // Maximum loss per trade in USD
+	defaultDailyLossLimit  = 50.0 // Maximum daily loss in USD
 )
 
 // SkipReason documents why a trade was skipped.
@@ -76,7 +75,7 @@ type TrackedMarket struct {
 	sniped        bool
 
 	// Binance price tracking (for faster winner detection)
-	BinanceSymbol    string  // e.g., "BTCUSDT"
+	BinanceSymbol     string  // e.g., "BTCUSDT"
 	BinanceStartPrice float64 // Price at market start time
 
 	// Price history for momentum detection (last 10 snapshots)
@@ -169,7 +168,7 @@ func (tm *TrackedMarket) IsSniped() bool {
 // TradeAnalysis contains the analysis results for a potential trade.
 type TradeAnalysis struct {
 	ShouldTrade     bool
-	Side            string  // "YES" or "NO"
+	Side            string // "YES" or "NO"
 	TokenID         string
 	EntryPrice      float64
 	Confidence      float64 // 0-1 confidence score
@@ -502,7 +501,7 @@ func (s *Sniper) trackMarket(market gamma.Market) (*TrackedMarket, error) {
 }
 
 // subscribeToToken subscribes to WebSocket updates for a token.
-func (s *Sniper) subscribeToToken(tracked *TrackedMarket, tokenID string, isYes bool) {
+func (s *Sniper) subscribeToToken(_ *TrackedMarket, tokenID string, _ bool) {
 	if err := s.ws.Subscribe(tokenID); err != nil {
 		log.Printf("[sniper] failed to subscribe to token %s: %v", tokenID, err)
 	}
@@ -869,7 +868,7 @@ func (s *Sniper) logAnalysis(tracked *TrackedMarket, analysis TradeAnalysis, tim
 }
 
 // executeSnipe executes the trade based on analysis.
-func (s *Sniper) executeSnipe(tracked *TrackedMarket, analysis TradeAnalysis, timeRemaining time.Duration) error {
+func (s *Sniper) executeSnipe(tracked *TrackedMarket, analysis TradeAnalysis, _ time.Duration) error {
 	// Record potential loss for daily tracking
 	s.dailyStats.AddLoss(analysis.MaxLoss)
 

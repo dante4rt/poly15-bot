@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math/big"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -19,13 +20,13 @@ import (
 )
 
 const (
-	baseURL            = "https://clob.polymarket.com"
-	headerAPIKey       = "POLY_API_KEY"
-	headerSignature    = "POLY_SIGNATURE"
-	headerTimestamp    = "POLY_TIMESTAMP"
-	headerPassphrase   = "POLY_PASSPHRASE"
-	headerAddress      = "POLY_ADDRESS"
-	defaultTimeout     = 30 * time.Second
+	baseURL          = "https://clob.polymarket.com"
+	headerAPIKey     = "POLY_API_KEY"
+	headerSignature  = "POLY_SIGNATURE"
+	headerTimestamp  = "POLY_TIMESTAMP"
+	headerPassphrase = "POLY_PASSPHRASE"
+	headerAddress    = "POLY_ADDRESS"
+	defaultTimeout   = 30 * time.Second
 )
 
 // Client is the CLOB REST API client with HMAC authentication.
@@ -344,6 +345,28 @@ func (c *Client) GetBalanceAllowance(assetType AssetType, tokenID string) (*Bala
 	}
 
 	return &balance, nil
+}
+
+// GetUSDCBalance returns the available USDC balance as a float64.
+func (c *Client) GetUSDCBalance() (float64, error) {
+	resp, err := c.GetBalanceAllowance(AssetTypeCollateral, "")
+	if err != nil {
+		return 0, err
+	}
+
+	// Balance is in wei (6 decimals for USDC)
+	balanceWei, ok := new(big.Int).SetString(resp.Balance, 10)
+	if !ok {
+		return 0, fmt.Errorf("invalid balance format: %s", resp.Balance)
+	}
+
+	// Convert to float: divide by 10^6
+	balanceFloat := new(big.Float).SetInt(balanceWei)
+	divisor := new(big.Float).SetInt64(1e6)
+	result := new(big.Float).Quo(balanceFloat, divisor)
+
+	balance, _ := result.Float64()
+	return balance, nil
 }
 
 // doRequest performs an authenticated HTTP request with automatic proxy rotation on 403.

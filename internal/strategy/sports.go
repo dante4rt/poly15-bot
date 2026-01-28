@@ -19,10 +19,9 @@ import (
 )
 
 const (
-	sportsCheckInterval = 10 * time.Second  // Check game status every 10s
-	sportsScanInterval  = 5 * time.Minute   // Scan for new markets every 5m
-	minWinProbability   = 0.95              // Minimum 95% win probability to trade
-	gameDecidedLeadNFL  = 21                // 3 TD lead = game decided
+	sportsCheckInterval = 10 * time.Second // Check game status every 10s
+	sportsScanInterval  = 5 * time.Minute  // Scan for new markets every 5m
+	minWinProbability   = 0.95             // Minimum 95% win probability to trade
 )
 
 // TrackedSportsMarket holds state for a sports market being monitored.
@@ -33,16 +32,16 @@ type TrackedSportsMarket struct {
 	EndTime    time.Time
 
 	// Matched ESPN game
-	Game       *sports.Game
-	TeamName   string  // Team this market is betting on (e.g., "Rams")
+	Game     *sports.Game
+	TeamName string // Team this market is betting on (e.g., "Rams")
 
 	// Prices from Gamma
-	YesPrice   float64
-	NoPrice    float64
+	YesPrice float64
+	NoPrice  float64
 
 	// Trade state
-	Sniped     bool
-	mu         sync.RWMutex
+	Sniped bool
+	mu     sync.RWMutex
 }
 
 // SportsSniper implements the sniping strategy for sports markets.
@@ -221,20 +220,20 @@ func extractTeamName(question string) string {
 	question = strings.ToLower(question)
 
 	teams := map[string]string{
-		"patriots": "Patriots",
-		"broncos":  "Broncos",
-		"rams":     "Rams",
-		"seahawks": "Seahawks",
-		"chiefs":   "Chiefs",
-		"bills":    "Bills",
-		"eagles":   "Eagles",
-		"49ers":    "49ers",
-		"lions":    "Lions",
-		"cowboys":  "Cowboys",
-		"packers":  "Packers",
-		"vikings":  "Vikings",
-		"ravens":   "Ravens",
-		"texans":   "Texans",
+		"patriots":   "Patriots",
+		"broncos":    "Broncos",
+		"rams":       "Rams",
+		"seahawks":   "Seahawks",
+		"chiefs":     "Chiefs",
+		"bills":      "Bills",
+		"eagles":     "Eagles",
+		"49ers":      "49ers",
+		"lions":      "Lions",
+		"cowboys":    "Cowboys",
+		"packers":    "Packers",
+		"vikings":    "Vikings",
+		"ravens":     "Ravens",
+		"texans":     "Texans",
 		"commanders": "Commanders",
 		"buccaneers": "Buccaneers",
 	}
@@ -306,7 +305,7 @@ func (s *SportsSniper) CheckAndSnipe() error {
 // SportsTradeAnalysis contains analysis results for a sports market.
 type SportsTradeAnalysis struct {
 	ShouldTrade    bool
-	Side           string  // "YES" or "NO"
+	Side           string // "YES" or "NO"
 	TokenID        string
 	EntryPrice     float64
 	WinProbability float64

@@ -625,6 +625,17 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 		}
 	}
 
+	// Check available USDC balance before placing order (skip in dry run)
+	if !ws.config.DryRun {
+		balance, err := ws.clob.GetUSDCBalance()
+		if err != nil {
+			log.Printf("[weather] warning: failed to check balance: %v", err)
+			// Continue anyway - let the API reject if insufficient
+		} else if balance < betAmount {
+			return fmt.Errorf("insufficient USDC balance: have $%.2f, need $%.2f", balance, betAmount)
+		}
+	}
+
 	// Calculate shares
 	shares := betAmount / opp.BidPrice
 
