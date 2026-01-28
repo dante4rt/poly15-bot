@@ -26,17 +26,17 @@ const (
 
 // WeatherOpportunity represents a trading opportunity in a weather market.
 type WeatherOpportunity struct {
-	WeatherMarket *gamma.WeatherMarket
-	Forecast      *weather.Forecast
-	OurProbYes    float64 // Our calculated probability for YES
+	WeatherMarket  *gamma.WeatherMarket
+	Forecast       *weather.Forecast
+	OurProbYes     float64 // Our calculated probability for YES
 	MarketPriceYes float64 // Market's implied probability (YES price)
-	Edge          float64 // OurProb - MarketPrice
-	ExpectedValue float64 // EV of the trade
-	Side          string  // "yes" or "no"
-	TokenID       string
-	BidPrice      float64 // Our limit order price
-	Confidence    float64 // How confident we are (0-1)
-	Score         float64 // Overall opportunity score
+	Edge           float64 // OurProb - MarketPrice
+	ExpectedValue  float64 // EV of the trade
+	Side           string  // "yes" or "no"
+	TokenID        string
+	BidPrice       float64 // Our limit order price
+	Confidence     float64 // How confident we are (0-1)
+	Score          float64 // Overall opportunity score
 }
 
 // WeatherPosition tracks an active weather trade.
@@ -45,7 +45,7 @@ type WeatherPosition struct {
 	TokenID        string
 	MarketSlug     string
 	MarketQuestion string
-	Side           string  // "yes" or "no"
+	Side           string // "yes" or "no"
 	BidPrice       float64
 	Shares         float64
 	PlacedAt       time.Time
@@ -127,15 +127,15 @@ type WeatherSniper struct {
 	edgeCalc *weather.EdgeCalculator
 
 	// Bankroll tracking
-	bankroll   float64
-	dailyLoss  float64
+	bankroll     float64
+	dailyLoss    float64
 	lastResetDay int
 
 	// Stats
-	totalTrades    int
-	totalFilled    int
-	totalCanceled  int
-	totalProfit    float64
+	totalTrades   int
+	totalFilled   int
+	totalCanceled int
+	totalProfit   float64
 }
 
 // NewWeatherSniper creates a new weather sniper strategy instance.
@@ -357,6 +357,12 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 			continue
 		}
 
+		// Skip Tier D cities - unpredictable, avoid losses
+		if location.Tier == weather.TierD {
+			log.Printf("[weather] skipping Tier D location: %s (unpredictable)", wm.Location)
+			continue
+		}
+
 		// Fetch forecast
 		daysAhead := int(wm.DaysUntilResolution())
 		if daysAhead < 0 {
@@ -454,7 +460,7 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 	}
 
 	// Score the opportunity
-	// Higher edge + higher confidence + sooner resolution = better
+	// Higher edge + higher confidence + sooner resolution + better location tier = better
 	timeBonus := 1.0
 	if daysAhead <= 1 {
 		timeBonus = 2.0 // Tomorrow - high bonus
@@ -471,10 +477,19 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		}
 	}
 
-	score := edge * confidence * 100 * timeBonus * volumeBonus
+	// Get location tier bonus - prioritize predictable cities
+	location := weather.FindLocationByName(wm.Location)
+	tierBonus := 0.5 // Default for unknown locations
+	tierStr := "?"
+	if location != nil {
+		tierBonus = location.Tier.TierMultiplier()
+		tierStr = string(location.Tier)
+	}
 
-	log.Printf("[weather] opportunity: %s - %s side, edge=%.1f%%, confidence=%.0f%%, score=%.1f",
-		wm.Market.Question[:minInt(50, len(wm.Market.Question))], side, edge*100, confidence*100, score)
+	score := edge * confidence * 100 * timeBonus * volumeBonus * tierBonus
+
+	log.Printf("[weather] opportunity: %s - %s side, edge=%.1f%%, confidence=%.0f%%, tier=%s, score=%.1f",
+		wm.Market.Question[:minInt(50, len(wm.Market.Question))], side, edge*100, confidence*100, tierStr, score)
 
 	return &WeatherOpportunity{
 		WeatherMarket:  wm,

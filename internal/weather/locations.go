@@ -1,65 +1,59 @@
 package weather
 
+// PredictabilityTier indicates how reliable weather forecasts are for a location.
+// Based on model coverage, terrain complexity, and maritime/lake effects.
+type PredictabilityTier string
+
+const (
+	TierS PredictabilityTier = "S" // Best: stable patterns, excellent model coverage
+	TierA PredictabilityTier = "A" // Good: reliable models, some variability
+	TierB PredictabilityTier = "B" // Moderate: variable weather, decent models
+	TierC PredictabilityTier = "C" // Poor: complex terrain, limited models
+	TierD PredictabilityTier = "D" // Avoid: unpredictable, poor model coverage
+)
+
+// TierMultiplier returns the scoring multiplier for a tier.
+func (t PredictabilityTier) TierMultiplier() float64 {
+	switch t {
+	case TierS:
+		return 2.0 // Strong preference
+	case TierA:
+		return 1.5
+	case TierB:
+		return 1.0
+	case TierC:
+		return 0.5 // Penalize
+	case TierD:
+		return 0.1 // Heavy penalty
+	default:
+		return 0.5
+	}
+}
+
 // Location represents a city with GPS coordinates.
 type Location struct {
-	Name         string   // Display name
-	Aliases      []string // Alternative names (NYC, New York, etc.)
-	Latitude     float64
-	Longitude    float64
-	TimezoneID   string // IANA timezone (e.g., "America/New_York")
+	Name       string   // Display name
+	Aliases    []string // Alternative names (NYC, New York, etc.)
+	Latitude   float64
+	Longitude  float64
+	TimezoneID string             // IANA timezone (e.g., "America/New_York")
+	Tier       PredictabilityTier // Forecast reliability tier
 }
 
 // AllCities contains all cities we track for weather markets (US + International).
+// Tier assignments based on: model coverage, terrain complexity, maritime effects.
+// Reference: UK Met Office UKV, HRRR, NAM, ECMWF, KMA coverage analysis.
 var AllCities = []Location{
-	// US Cities
+	// ═══════════════════════════════════════════════════════════════════
+	// TIER S - Best predictability (flat terrain, stable patterns, excellent models)
+	// ═══════════════════════════════════════════════════════════════════
 	{
-		Name:       "New York",
-		Aliases:    []string{"NYC", "New York City", "NY", "Manhattan"},
-		Latitude:   40.7128,
-		Longitude:  -74.0060,
-		TimezoneID: "America/New_York",
-	},
-	{
-		Name:       "Los Angeles",
-		Aliases:    []string{"LA", "L.A."},
-		Latitude:   34.0522,
-		Longitude:  -118.2437,
-		TimezoneID: "America/Los_Angeles",
-	},
-	{
-		Name:       "Chicago",
-		Aliases:    []string{"Chi-Town"},
-		Latitude:   41.8781,
-		Longitude:  -87.6298,
-		TimezoneID: "America/Chicago",
-	},
-	{
-		Name:       "Miami",
-		Aliases:    []string{"Miami Beach"},
-		Latitude:   25.7617,
-		Longitude:  -80.1918,
-		TimezoneID: "America/New_York",
-	},
-	{
-		Name:       "Denver",
-		Aliases:    []string{"Mile High City"},
-		Latitude:   39.7392,
-		Longitude:  -104.9903,
-		TimezoneID: "America/Denver",
-	},
-	{
-		Name:       "Seattle",
-		Aliases:    []string{"SEA"},
-		Latitude:   47.6062,
-		Longitude:  -122.3321,
-		TimezoneID: "America/Los_Angeles",
-	},
-	{
-		Name:       "Atlanta",
-		Aliases:    []string{"ATL"},
-		Latitude:   33.7490,
-		Longitude:  -84.3880,
-		TimezoneID: "America/New_York",
+		Name:       "London",
+		Aliases:    []string{},
+		Latitude:   51.5074,
+		Longitude:  -0.1278,
+		TimezoneID: "Europe/London",
+		Tier:       TierS, // UK Met Office UKV 1.5km - best in world
 	},
 	{
 		Name:       "Dallas",
@@ -67,6 +61,15 @@ var AllCities = []Location{
 		Latitude:   32.7767,
 		Longitude:  -96.7970,
 		TimezoneID: "America/Chicago",
+		Tier:       TierS, // Flat terrain, HRRR excels
+	},
+	{
+		Name:       "Atlanta",
+		Aliases:    []string{"ATL"},
+		Latitude:   33.7490,
+		Longitude:  -84.3880,
+		TimezoneID: "America/New_York",
+		Tier:       TierS, // Inland, stable SE patterns, HRRR/NAM strong
 	},
 	{
 		Name:       "Houston",
@@ -74,6 +77,7 @@ var AllCities = []Location{
 		Latitude:   29.7604,
 		Longitude:  -95.3698,
 		TimezoneID: "America/Chicago",
+		Tier:       TierS, // Flat Texas, good models
 	},
 	{
 		Name:       "Phoenix",
@@ -81,34 +85,7 @@ var AllCities = []Location{
 		Latitude:   33.4484,
 		Longitude:  -112.0740,
 		TimezoneID: "America/Phoenix",
-	},
-	{
-		Name:       "Philadelphia",
-		Aliases:    []string{"Philly"},
-		Latitude:   39.9526,
-		Longitude:  -75.1652,
-		TimezoneID: "America/New_York",
-	},
-	{
-		Name:       "San Francisco",
-		Aliases:    []string{"SF"},
-		Latitude:   37.7749,
-		Longitude:  -122.4194,
-		TimezoneID: "America/Los_Angeles",
-	},
-	{
-		Name:       "Boston",
-		Aliases:    []string{},
-		Latitude:   42.3601,
-		Longitude:  -71.0589,
-		TimezoneID: "America/New_York",
-	},
-	{
-		Name:       "Washington",
-		Aliases:    []string{"Washington DC", "DC"},
-		Latitude:   38.9072,
-		Longitude:  -77.0369,
-		TimezoneID: "America/New_York",
+		Tier:       TierS, // Desert = very predictable
 	},
 	{
 		Name:       "Las Vegas",
@@ -116,35 +93,18 @@ var AllCities = []Location{
 		Latitude:   36.1699,
 		Longitude:  -115.1398,
 		TimezoneID: "America/Los_Angeles",
+		Tier:       TierS, // Desert, stable patterns
 	},
+	// ═══════════════════════════════════════════════════════════════════
+	// TIER A - Good predictability (reliable models, some variability)
+	// ═══════════════════════════════════════════════════════════════════
 	{
-		Name:       "San Diego",
-		Aliases:    []string{},
-		Latitude:   32.7157,
-		Longitude:  -117.1611,
-		TimezoneID: "America/Los_Angeles",
-	},
-	{
-		Name:       "Minneapolis",
-		Aliases:    []string{},
-		Latitude:   44.9778,
-		Longitude:  -93.2650,
-		TimezoneID: "America/Chicago",
-	},
-	{
-		Name:       "Detroit",
-		Aliases:    []string{},
-		Latitude:   42.3314,
-		Longitude:  -83.0458,
-		TimezoneID: "America/Detroit",
-	},
-	// International Cities
-	{
-		Name:       "Toronto",
-		Aliases:    []string{},
-		Latitude:   43.6532,
-		Longitude:  -79.3832,
-		TimezoneID: "America/Toronto",
+		Name:       "New York",
+		Aliases:    []string{"NYC", "New York City", "NY", "Manhattan"},
+		Latitude:   40.7128,
+		Longitude:  -74.0060,
+		TimezoneID: "America/New_York",
+		Tier:       TierA, // Good coverage but coastal, nor'easters
 	},
 	{
 		Name:       "Seoul",
@@ -152,27 +112,47 @@ var AllCities = []Location{
 		Latitude:   37.5665,
 		Longitude:  126.9780,
 		TimezoneID: "Asia/Seoul",
+		Tier:       TierA, // KMA local model, continental
 	},
 	{
-		Name:       "Tokyo",
-		Aliases:    []string{},
-		Latitude:   35.6762,
-		Longitude:  139.6503,
-		TimezoneID: "Asia/Tokyo",
+		Name:       "Chicago",
+		Aliases:    []string{"Chi-Town"},
+		Latitude:   41.8781,
+		Longitude:  -87.6298,
+		TimezoneID: "America/Chicago",
+		Tier:       TierA, // Lake Michigan effect but good models
 	},
 	{
-		Name:       "London",
-		Aliases:    []string{},
-		Latitude:   51.5074,
-		Longitude:  -0.1278,
-		TimezoneID: "Europe/London",
+		Name:       "Philadelphia",
+		Aliases:    []string{"Philly"},
+		Latitude:   39.9526,
+		Longitude:  -75.1652,
+		TimezoneID: "America/New_York",
+		Tier:       TierA, // East coast, good models
 	},
 	{
-		Name:       "Paris",
+		Name:       "Boston",
 		Aliases:    []string{},
-		Latitude:   48.8566,
-		Longitude:  2.3522,
-		TimezoneID: "Europe/Paris",
+		Latitude:   42.3601,
+		Longitude:  -71.0589,
+		TimezoneID: "America/New_York",
+		Tier:       TierA, // Coastal but well-monitored
+	},
+	{
+		Name:       "Washington",
+		Aliases:    []string{"Washington DC", "DC"},
+		Latitude:   38.9072,
+		Longitude:  -77.0369,
+		TimezoneID: "America/New_York",
+		Tier:       TierA, // Inland east coast, good coverage
+	},
+	{
+		Name:       "San Diego",
+		Aliases:    []string{},
+		Latitude:   32.7157,
+		Longitude:  -117.1611,
+		TimezoneID: "America/Los_Angeles",
+		Tier:       TierA, // Stable Mediterranean climate
 	},
 	{
 		Name:       "Berlin",
@@ -180,41 +160,101 @@ var AllCities = []Location{
 		Latitude:   52.5200,
 		Longitude:  13.4050,
 		TimezoneID: "Europe/Berlin",
+		Tier:       TierA, // ICON-EU 7km, flat terrain
 	},
 	{
-		Name:       "Sydney",
+		Name:       "Paris",
 		Aliases:    []string{},
-		Latitude:   -33.8688,
-		Longitude:  151.2093,
-		TimezoneID: "Australia/Sydney",
+		Latitude:   48.8566,
+		Longitude:  2.3522,
+		TimezoneID: "Europe/Paris",
+		Tier:       TierA, // AROME 1.3km, good coverage
 	},
 	{
-		Name:       "Melbourne",
+		Name:       "Tokyo",
 		Aliases:    []string{},
-		Latitude:   -37.8136,
-		Longitude:  144.9631,
-		TimezoneID: "Australia/Melbourne",
+		Latitude:   35.6762,
+		Longitude:  139.6503,
+		TimezoneID: "Asia/Tokyo",
+		Tier:       TierA, // JMA excellent but maritime influence
+	},
+	// ═══════════════════════════════════════════════════════════════════
+	// TIER B - Moderate predictability (variable weather, decent models)
+	// ═══════════════════════════════════════════════════════════════════
+	{
+		Name:       "Seattle",
+		Aliases:    []string{"SEA"},
+		Latitude:   47.6062,
+		Longitude:  -122.3321,
+		TimezoneID: "America/Los_Angeles",
+		Tier:       TierB, // Pacific maritime, Cascade mountains
 	},
 	{
-		Name:       "Auckland",
+		Name:       "Toronto",
 		Aliases:    []string{},
-		Latitude:   -36.8485,
-		Longitude:  174.7633,
-		TimezoneID: "Pacific/Auckland",
+		Latitude:   43.6532,
+		Longitude:  -79.3832,
+		TimezoneID: "America/Toronto",
+		Tier:       TierB, // Lake Ontario effect, changeable
 	},
 	{
-		Name:       "Wellington",
-		Aliases:    []string{},
-		Latitude:   -41.2865,
-		Longitude:  174.7762,
-		TimezoneID: "Pacific/Auckland",
+		Name:       "Denver",
+		Aliases:    []string{"Mile High City"},
+		Latitude:   39.7392,
+		Longitude:  -104.9903,
+		TimezoneID: "America/Denver",
+		Tier:       TierB, // Mountain effects, rapid changes
 	},
+	{
+		Name:       "Minneapolis",
+		Aliases:    []string{},
+		Latitude:   44.9778,
+		Longitude:  -93.2650,
+		TimezoneID: "America/Chicago",
+		Tier:       TierB, // Continental extremes
+	},
+	{
+		Name:       "Detroit",
+		Aliases:    []string{},
+		Latitude:   42.3314,
+		Longitude:  -83.0458,
+		TimezoneID: "America/Detroit",
+		Tier:       TierB, // Great Lakes effect
+	},
+	{
+		Name:       "San Francisco",
+		Aliases:    []string{"SF"},
+		Latitude:   37.7749,
+		Longitude:  -122.4194,
+		TimezoneID: "America/Los_Angeles",
+		Tier:       TierB, // Microclimates, fog
+	},
+	{
+		Name:       "Miami",
+		Aliases:    []string{"Miami Beach"},
+		Latitude:   25.7617,
+		Longitude:  -80.1918,
+		TimezoneID: "America/New_York",
+		Tier:       TierB, // Tropical variability
+	},
+	{
+		Name:       "Los Angeles",
+		Aliases:    []string{"LA", "L.A."},
+		Latitude:   34.0522,
+		Longitude:  -118.2437,
+		TimezoneID: "America/Los_Angeles",
+		Tier:       TierB, // Marine layer, microclimates
+	},
+	// ═══════════════════════════════════════════════════════════════════
+	// TIER C - Poor predictability (complex terrain, limited models)
+	// ═══════════════════════════════════════════════════════════════════
 	{
 		Name:       "Buenos Aires",
 		Aliases:    []string{},
 		Latitude:   -34.6037,
 		Longitude:  -58.3816,
 		TimezoneID: "America/Argentina/Buenos_Aires",
+		Tier:       TierC, // Southern hemisphere, limited models
 	},
 	{
 		Name:       "Sao Paulo",
@@ -222,6 +262,7 @@ var AllCities = []Location{
 		Latitude:   -23.5505,
 		Longitude:  -46.6333,
 		TimezoneID: "America/Sao_Paulo",
+		Tier:       TierC, // Limited model coverage
 	},
 	{
 		Name:       "Mexico City",
@@ -229,6 +270,42 @@ var AllCities = []Location{
 		Latitude:   19.4326,
 		Longitude:  -99.1332,
 		TimezoneID: "America/Mexico_City",
+		Tier:       TierC, // High altitude, complex terrain
+	},
+	{
+		Name:       "Sydney",
+		Aliases:    []string{},
+		Latitude:   -33.8688,
+		Longitude:  151.2093,
+		TimezoneID: "Australia/Sydney",
+		Tier:       TierC, // Southern hemisphere, variable
+	},
+	{
+		Name:       "Melbourne",
+		Aliases:    []string{},
+		Latitude:   -37.8136,
+		Longitude:  144.9631,
+		TimezoneID: "Australia/Melbourne",
+		Tier:       TierC, // "Four seasons in one day"
+	},
+	{
+		Name:       "Auckland",
+		Aliases:    []string{},
+		Latitude:   -36.8485,
+		Longitude:  174.7633,
+		TimezoneID: "Pacific/Auckland",
+		Tier:       TierC, // Pacific maritime, variable
+	},
+	// ═══════════════════════════════════════════════════════════════════
+	// TIER D - Avoid (unpredictable, poor model coverage)
+	// ═══════════════════════════════════════════════════════════════════
+	{
+		Name:       "Wellington",
+		Aliases:    []string{},
+		Latitude:   -41.2865,
+		Longitude:  174.7762,
+		TimezoneID: "Pacific/Auckland",
+		Tier:       TierD, // Windiest city, extreme variability
 	},
 	{
 		Name:       "Ankara",
@@ -236,6 +313,7 @@ var AllCities = []Location{
 		Latitude:   39.9334,
 		Longitude:  32.8597,
 		TimezoneID: "Europe/Istanbul",
+		Tier:       TierD, // Limited model coverage for Turkey
 	},
 	{
 		Name:       "Istanbul",
@@ -243,6 +321,7 @@ var AllCities = []Location{
 		Latitude:   41.0082,
 		Longitude:  28.9784,
 		TimezoneID: "Europe/Istanbul",
+		Tier:       TierD, // Bosphorus effects, complex
 	},
 	{
 		Name:       "Moscow",
@@ -250,6 +329,7 @@ var AllCities = []Location{
 		Latitude:   55.7558,
 		Longitude:  37.6173,
 		TimezoneID: "Europe/Moscow",
+		Tier:       TierD, // Limited western model access
 	},
 	{
 		Name:       "Beijing",
@@ -257,6 +337,7 @@ var AllCities = []Location{
 		Latitude:   39.9042,
 		Longitude:  116.4074,
 		TimezoneID: "Asia/Shanghai",
+		Tier:       TierD, // CMA models not accessible
 	},
 	{
 		Name:       "Shanghai",
@@ -264,6 +345,7 @@ var AllCities = []Location{
 		Latitude:   31.2304,
 		Longitude:  121.4737,
 		TimezoneID: "Asia/Shanghai",
+		Tier:       TierD, // Limited model access
 	},
 	{
 		Name:       "Hong Kong",
@@ -271,6 +353,7 @@ var AllCities = []Location{
 		Latitude:   22.3193,
 		Longitude:  114.1694,
 		TimezoneID: "Asia/Hong_Kong",
+		Tier:       TierD, // Typhoons, tropical
 	},
 	{
 		Name:       "Singapore",
@@ -278,6 +361,7 @@ var AllCities = []Location{
 		Latitude:   1.3521,
 		Longitude:  103.8198,
 		TimezoneID: "Asia/Singapore",
+		Tier:       TierD, // Tropical, daily thunderstorms
 	},
 	{
 		Name:       "Mumbai",
@@ -285,6 +369,7 @@ var AllCities = []Location{
 		Latitude:   19.0760,
 		Longitude:  72.8777,
 		TimezoneID: "Asia/Kolkata",
+		Tier:       TierD, // Monsoon, limited models
 	},
 	{
 		Name:       "Delhi",
@@ -292,6 +377,7 @@ var AllCities = []Location{
 		Latitude:   28.6139,
 		Longitude:  77.2090,
 		TimezoneID: "Asia/Kolkata",
+		Tier:       TierD, // Monsoon effects, dust storms
 	},
 	{
 		Name:       "Dubai",
@@ -299,6 +385,7 @@ var AllCities = []Location{
 		Latitude:   25.2048,
 		Longitude:  55.2708,
 		TimezoneID: "Asia/Dubai",
+		Tier:       TierD, // Limited model coverage
 	},
 	{
 		Name:       "Cairo",
@@ -306,6 +393,7 @@ var AllCities = []Location{
 		Latitude:   30.0444,
 		Longitude:  31.2357,
 		TimezoneID: "Africa/Cairo",
+		Tier:       TierD, // Limited model coverage
 	},
 	{
 		Name:       "Cape Town",
@@ -313,6 +401,7 @@ var AllCities = []Location{
 		Latitude:   -33.9249,
 		Longitude:  18.4241,
 		TimezoneID: "Africa/Johannesburg",
+		Tier:       TierD, // Complex terrain, limited models
 	},
 	{
 		Name:       "Johannesburg",
@@ -320,6 +409,7 @@ var AllCities = []Location{
 		Latitude:   -26.2041,
 		Longitude:  28.0473,
 		TimezoneID: "Africa/Johannesburg",
+		Tier:       TierD, // Limited model coverage
 	},
 }
 
