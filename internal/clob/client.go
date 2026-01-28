@@ -390,9 +390,9 @@ func (c *Client) doRequest(method, path string, body []byte) (*http.Response, er
 			return nil, err
 		}
 
-		// Check for Cloudflare 403 block
-		if resp.StatusCode == http.StatusForbidden && len(c.proxyURLs) > 1 {
-			log.Printf("[clob] got 403 (Cloudflare block), rotating proxy...")
+		// Check for Cloudflare 403 block or proxy auth issues (401)
+		if (resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusUnauthorized) && len(c.proxyURLs) > 1 {
+			log.Printf("[clob] got %d, rotating proxy...", resp.StatusCode)
 			resp.Body.Close()
 			if rotateErr := c.rotateProxy(); rotateErr == nil {
 				continue // Retry with new proxy
@@ -405,7 +405,7 @@ func (c *Client) doRequest(method, path string, body []byte) (*http.Response, er
 	if lastErr != nil {
 		return nil, fmt.Errorf("all proxies failed: %w", lastErr)
 	}
-	return nil, fmt.Errorf("all proxies returned 403")
+	return nil, fmt.Errorf("all proxies returned 401/403")
 }
 
 // doRequestOnce performs a single authenticated HTTP request.
