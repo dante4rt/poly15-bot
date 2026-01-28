@@ -416,6 +416,14 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 // evaluateOpportunity calculates edge for a weather market opportunity.
 // modelAgreement is 0-1 indicating how much weather models agree (1 = perfect agreement).
 func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *weather.Forecast, daysAhead int, modelAgreement float64) *WeatherOpportunity {
+	// Skip markets that appear already resolved (prices at extremes)
+	// YES < 0.01 or YES > 0.99 indicates the market outcome is effectively decided
+	if wm.YesPrice < 0.01 || wm.YesPrice > 0.99 {
+		log.Printf("[weather] skipping %s: price at extreme (%.4f) - likely resolved",
+			wm.Location, wm.YesPrice)
+		return nil
+	}
+
 	var ourProbYes float64
 	var confidence float64
 
