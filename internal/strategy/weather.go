@@ -626,16 +626,17 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 	}
 
 	// Check available USDC balance before placing order (skip in dry run)
+	// Note: balance endpoint may return 401 even with valid API keys - it's a known issue
+	// If balance check fails, we continue and let the order API give us the real result
 	if !ws.config.DryRun {
 		balance, err := ws.clob.GetUSDCBalance()
 		if err != nil {
-			// Don't continue if we can't verify balance - avoid wasting API calls
-			return fmt.Errorf("failed to check balance (skipping trade): %v", err)
-		}
-		if balance < betAmount {
+			log.Printf("[weather] balance check unavailable: %v (proceeding anyway)", err)
+		} else if balance < betAmount {
 			return fmt.Errorf("insufficient USDC balance: have $%.2f, need $%.2f", balance, betAmount)
+		} else {
+			log.Printf("[weather] balance: $%.2f (need $%.2f)", balance, betAmount)
 		}
-		log.Printf("[weather] balance check passed: have $%.2f, need $%.2f", balance, betAmount)
 	}
 
 	// Calculate shares
