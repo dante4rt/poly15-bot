@@ -97,15 +97,17 @@ func Load() (*Config, error) {
 		BlackSwanMaxVolume:    getEnvFloat("BLACKSWAN_MAX_VOLUME", 10000),
 		BlackSwanMaxDays:      getEnvInt("BLACKSWAN_MAX_DAYS", 30), // Prefer markets resolving within 30 days
 
-		// Weather sniper defaults ($15 bankroll optimized)
-		WeatherBankroll:       getEnvFloat("WEATHER_BANKROLL", 15),
-		WeatherMinEdge:        getEnvFloat("WEATHER_MIN_EDGE", 0.10),        // 10% minimum edge
-		WeatherMinConfidence:  getEnvFloat("WEATHER_MIN_CONFIDENCE", 0.70), // 70% confidence
-		WeatherMaxPosition:    getEnvFloat("WEATHER_MAX_POSITION", 0.30),   // $0.30 max per trade
-		WeatherBetPercent:     getEnvFloat("WEATHER_BET_PERCENT", 0.02),    // 2% of bankroll
-		WeatherDailyLossLimit: getEnvFloat("WEATHER_DAILY_LOSS_LIMIT", 1.50),
+		// Weather sniper defaults (dynamic sizing - uses actual balance)
+		// Note: Polymarket requires minimum 5 shares per order
+		// At 20% bet percent with $3 balance = $0.60 → can afford 5 shares at max $0.12/share
+		WeatherBankroll:       getEnvFloat("WEATHER_BANKROLL", 15),           // Fallback if balance check fails
+		WeatherMinEdge:        getEnvFloat("WEATHER_MIN_EDGE", 0.10),         // 10% minimum edge
+		WeatherMinConfidence:  getEnvFloat("WEATHER_MIN_CONFIDENCE", 0.70),   // 70% confidence
+		WeatherMaxPosition:    getEnvFloat("WEATHER_MAX_POSITION", 5.00),     // $5 max per trade (5 shares at $1)
+		WeatherBetPercent:     getEnvFloat("WEATHER_BET_PERCENT", 0.20),      // 20% of balance per bet
+		WeatherDailyLossLimit: getEnvFloat("WEATHER_DAILY_LOSS_LIMIT", 10.0), // Higher for larger bankrolls
 		WeatherMaxTrades:      getEnvInt("WEATHER_MAX_TRADES", 10),
-		WeatherMaxExposure:    getEnvFloat("WEATHER_MAX_EXPOSURE", 3.00),
+		WeatherMaxExposure:    getEnvFloat("WEATHER_MAX_EXPOSURE", 50.00),    // Higher for larger bankrolls
 		WeatherMinVolume:      getEnvFloat("WEATHER_MIN_VOLUME", 500),
 		WeatherMaxSpread:      getEnvFloat("WEATHER_MAX_SPREAD", 0.05), // 5% max spread
 		WeatherBidDiscount:    getEnvFloat("WEATHER_BID_DISCOUNT", 0.12),

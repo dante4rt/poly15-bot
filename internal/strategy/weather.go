@@ -636,48 +636,64 @@ func (ws *WeatherSniper) calculateConfidence(dist *weather.TempDistribution, thr
 
 // PlaceTrade places a limit order for a weather opportunity.
 func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
-	// Determine if this will be a marketable order (price too low for limit order)
-	// Marketable orders require $1 minimum on Polymarket
-	const minMarketableOrderSize = 1.0
-	const minLimitOrderPrice = 0.002
+	// Polymarket minimums
+	const minMarketableOrderSize = 1.0 // $1 minimum for marketable orders
+	const minLimitOrderPrice = 0.02    // 2 cents minimum for limit orders
+	const minSharesPerOrder = 5.0      // Polymarket requires minimum 5 shares
+
 	isMarketable := opp.BidPrice < minLimitOrderPrice
 
-	// Calculate bet amount (% of bankroll, capped by max position)
-	betAmount := ws.bankroll * ws.config.WeatherBetPercent
+	// Calculate minimum bet amount to meet 5 share requirement
+	minBetForShares := minSharesPerOrder * opp.BidPrice
+
+	// Get actual USDC balance for dynamic position sizing (skip in dry run)
+	// Uses actual balance instead of hardcoded bankroll for flexibility
+	availableBalance := ws.bankroll // Default to configured bankroll
+	if !ws.config.DryRun {
+		balance, err := ws.clob.GetUSDCBalance()
+		if err != nil {
+			log.Printf("[weather] balance check failed: %v (using configured bankroll)", err)
+		} else {
+			availableBalance = balance
+			log.Printf("[weather] using actual balance: $%.2f", availableBalance)
+		}
+	}
+
+	// Calculate bet amount (% of available balance, capped by max position)
+	betAmount := availableBalance * ws.config.WeatherBetPercent
 	if betAmount > ws.config.WeatherMaxPosition {
 		betAmount = ws.config.WeatherMaxPosition
 	}
 
+	// Check if we can meet minimum 5 shares requirement
+	// If not, skip trade gracefully instead of forcing
+	if betAmount < minBetForShares {
+		return fmt.Errorf("skipping: bet amount $%.2f too small for 5 shares (need $%.2f at $%.2f/share)",
+			betAmount, minBetForShares, opp.BidPrice)
+	}
+
 	// Enforce $1 minimum for marketable orders
 	if isMarketable && betAmount < minMarketableOrderSize {
-		betAmount = minMarketableOrderSize
-		log.Printf("[weather] marketable order: increasing bet to $%.2f minimum", betAmount)
+		return fmt.Errorf("skipping: marketable order requires $1.00 minimum (have $%.2f)", betAmount)
 	}
 
 	// Check exposure limits
 	currentExposure := ws.tracker.TotalExposure()
 	if currentExposure+betAmount > ws.config.WeatherMaxExposure {
 		betAmount = ws.config.WeatherMaxExposure - currentExposure
+		// After adjusting for exposure, check if we can still meet minimums
+		if betAmount < minBetForShares {
+			return fmt.Errorf("skipping: exposure limit leaves $%.2f, need $%.2f for 5 shares", betAmount, minBetForShares)
+		}
 		if isMarketable && betAmount < minMarketableOrderSize {
-			return fmt.Errorf("insufficient exposure for marketable order (need $%.2f, have $%.2f)", minMarketableOrderSize, betAmount)
+			return fmt.Errorf("skipping: exposure limit leaves $%.2f, marketable requires $1.00", betAmount)
 		}
-		if betAmount < 0.01 {
-			return fmt.Errorf("insufficient exposure remaining")
-		}
+		log.Printf("[weather] adjusted bet to $%.2f due to exposure limit", betAmount)
 	}
 
-	// Check available USDC balance before placing order (skip in dry run)
-	// Note: balance endpoint may return 401 even with valid API keys - it's a known issue
-	// If balance check fails, we continue and let the order API give us the real result
-	if !ws.config.DryRun {
-		balance, err := ws.clob.GetUSDCBalance()
-		if err != nil {
-			log.Printf("[weather] balance check unavailable: %v (proceeding anyway)", err)
-		} else if balance < betAmount {
-			return fmt.Errorf("insufficient USDC balance: have $%.2f, need $%.2f", balance, betAmount)
-		} else {
-			log.Printf("[weather] balance: $%.2f (need $%.2f)", balance, betAmount)
-		}
+	// Final balance check to ensure we have enough
+	if !ws.config.DryRun && betAmount > availableBalance {
+		return fmt.Errorf("skipping: insufficient balance $%.2f for $%.2f bet", availableBalance, betAmount)
 	}
 
 	// Calculate shares (round to 4 decimal places for Polymarket precision)
