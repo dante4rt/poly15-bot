@@ -388,23 +388,45 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 			continue
 		}
 
+		// Use relevant agreement based on market type
+		// "Above X" markets care about high temp agreement
+		// "Below X" markets care about low temp agreement
+		var relevantAgreement float64
+		var relevantSpread float64
+		var tempType string
+		switch wm.MarketType {
+		case gamma.WeatherTypeTempAbove:
+			relevantAgreement = consensus.HighTempAgreement()
+			relevantSpread = consensus.TempHighSpread
+			tempType = "high"
+		case gamma.WeatherTypeTempBelow:
+			relevantAgreement = consensus.LowTempAgreement()
+			relevantSpread = consensus.TempLowSpread
+			tempType = "low"
+		default:
+			// For snow/rain, use overall agreement
+			relevantAgreement = consensus.Agreement
+			relevantSpread = consensus.TempHighSpread
+			tempType = "overall"
+		}
+
 		// Skip if models disagree too much (agreement < 0.5 means >5°C spread)
-		if consensus.Agreement < 0.5 {
-			log.Printf("[weather] skipping %s: models disagree (agreement=%.0f%%, spread=%.1f°C)",
-				wm.Location, consensus.Agreement*100, consensus.TempHighSpread)
+		if relevantAgreement < 0.5 {
+			log.Printf("[weather] skipping %s: models disagree on %s temp (agreement=%.0f%%, spread=%.1f°C)",
+				wm.Location, tempType, relevantAgreement*100, relevantSpread)
 			continue
 		}
 
 		// Log model consensus
 		if len(consensus.Models) > 1 {
-			log.Printf("[weather] %s: %d models agree (%.0f%%), high=%.1f°C±%.1f°C",
-				wm.Location, len(consensus.Models), consensus.Agreement*100,
-				consensus.AvgTempHigh, consensus.TempHighSpread/2)
+			log.Printf("[weather] %s: %d models agree on %s temp (%.0f%%), %.1f°C±%.1f°C",
+				wm.Location, len(consensus.Models), tempType, relevantAgreement*100,
+				consensus.AvgTempHigh, relevantSpread/2)
 		}
 
 		// Calculate probability based on market type using consensus forecast
 		forecast := consensus.BestForecast()
-		opp := ws.evaluateOpportunity(wm, forecast, daysAhead, consensus.Agreement)
+		opp := ws.evaluateOpportunity(wm, forecast, daysAhead, relevantAgreement)
 		if opp != nil {
 			opportunities = append(opportunities, opp)
 		}

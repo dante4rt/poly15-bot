@@ -369,6 +369,26 @@ func (c *Client) GetConsensusForecast(loc *Location, date time.Time) (*Consensus
 	return consensus, nil
 }
 
+// HighTempAgreement returns agreement based only on high temp spread.
+// Use this for "above X" temperature markets.
+func (cf *ConsensusForecast) HighTempAgreement() float64 {
+	agreement := 1.0 - (cf.TempHighSpread / 10.0)
+	if agreement < 0 {
+		return 0
+	}
+	return agreement
+}
+
+// LowTempAgreement returns agreement based only on low temp spread.
+// Use this for "below X" temperature markets.
+func (cf *ConsensusForecast) LowTempAgreement() float64 {
+	agreement := 1.0 - (cf.TempLowSpread / 10.0)
+	if agreement < 0 {
+		return 0
+	}
+	return agreement
+}
+
 // BestForecast returns the most reliable forecast from consensus.
 // Uses average of models when they agree, primary model when they disagree.
 func (cf *ConsensusForecast) BestForecast() *Forecast {
