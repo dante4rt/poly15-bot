@@ -646,17 +646,24 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 	// Calculate minimum bet amount to meet 5 share requirement
 	minBetForShares := minSharesPerOrder * opp.BidPrice
 
-	// Get actual USDC balance for dynamic position sizing (skip in dry run)
-	// Uses actual balance instead of hardcoded bankroll for flexibility
-	availableBalance := ws.bankroll // Default to configured bankroll
-	if !ws.config.DryRun {
+	// Get balance for position sizing (priority: WEATHER_BALANCE env > API > bankroll fallback)
+	var availableBalance float64
+	if ws.config.WeatherBalance > 0 {
+		// User explicitly set their balance via env var
+		availableBalance = ws.config.WeatherBalance
+		log.Printf("[weather] using configured balance: $%.2f", availableBalance)
+	} else if !ws.config.DryRun {
+		// Try API (may fail with 401 if API key lacks permission)
 		balance, err := ws.clob.GetUSDCBalance()
 		if err != nil {
-			log.Printf("[weather] balance check failed: %v (using configured bankroll)", err)
+			availableBalance = ws.bankroll
+			log.Printf("[weather] balance API failed, using fallback: $%.2f (set WEATHER_BALANCE for accuracy)", availableBalance)
 		} else {
 			availableBalance = balance
-			log.Printf("[weather] using actual balance: $%.2f", availableBalance)
+			log.Printf("[weather] using API balance: $%.2f", availableBalance)
 		}
+	} else {
+		availableBalance = ws.bankroll
 	}
 
 	// Calculate bet amount (% of available balance, capped by max position)

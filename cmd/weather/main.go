@@ -52,7 +52,12 @@ func main() {
 	}
 	log.Printf("mode:             %s", mode)
 	log.Printf("chain ID:         %d", cfg.PolygonChainID)
-	log.Printf("bankroll:         $%.2f", cfg.WeatherBankroll)
+	if cfg.WeatherBalance > 0 {
+		log.Printf("balance:          $%.2f (from WEATHER_BALANCE)", cfg.WeatherBalance)
+	} else {
+		log.Printf("balance:          (will try API, fallback: $%.2f)", cfg.WeatherBankroll)
+	}
+	log.Printf("bet percent:      %.0f%%", cfg.WeatherBetPercent*100)
 	log.Printf("min edge:         %.0f%%", cfg.WeatherMinEdge*100)
 	log.Printf("min confidence:   %.0f%%", cfg.WeatherMinConfidence*100)
 	log.Printf("max position:     $%.2f", cfg.WeatherMaxPosition)

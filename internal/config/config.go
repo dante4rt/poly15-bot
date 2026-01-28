@@ -53,15 +53,16 @@ type Config struct {
 	BlackSwanMaxVolume    float64 // Maximum market volume (avoid liquid markets) (default: 10000)
 	BlackSwanMaxDays      int     // Maximum days until resolution (default: 30) - prefer fast-resolving markets
 
-	// Weather sniper strategy parameters ($15 bankroll optimized)
-	WeatherBankroll       float64 // Total bankroll for weather trading (default: 15)
+	// Weather sniper strategy parameters (dynamic sizing)
+	WeatherBalance        float64 // Your actual USDC balance (set this! 0 = try API)
+	WeatherBankroll       float64 // Fallback if balance not set and API fails
 	WeatherMinEdge        float64 // Minimum edge to trade (default: 0.10 = 10%)
 	WeatherMinConfidence  float64 // Minimum confidence in forecast (default: 0.70 = 70%)
-	WeatherMaxPosition    float64 // Maximum position size per trade (default: 0.30 = $0.30)
-	WeatherBetPercent     float64 // Bankroll percentage per bet (default: 0.02 = 2%)
-	WeatherDailyLossLimit float64 // Daily loss limit (default: 1.50 = $1.50)
+	WeatherMaxPosition    float64 // Maximum position size per trade (default: 5.00)
+	WeatherBetPercent     float64 // Balance percentage per bet (default: 0.20 = 20%)
+	WeatherDailyLossLimit float64 // Daily loss limit (default: 10.00)
 	WeatherMaxTrades      int     // Maximum concurrent trades (default: 10)
-	WeatherMaxExposure    float64 // Maximum total exposure (default: 3.00 = $3.00)
+	WeatherMaxExposure    float64 // Maximum total exposure (default: 50.00)
 	WeatherMinVolume      float64 // Minimum market volume (default: 500)
 	WeatherMaxSpread      float64 // Maximum bid-ask spread (default: 0.05 = 5%)
 	WeatherBidDiscount    float64 // How far below market to bid (default: 0.12 = 12%)
@@ -99,8 +100,9 @@ func Load() (*Config, error) {
 
 		// Weather sniper defaults (dynamic sizing - uses actual balance)
 		// Note: Polymarket requires minimum 5 shares per order
-		// At 20% bet percent with $3 balance = $0.60 → can afford 5 shares at max $0.12/share
-		WeatherBankroll:       getEnvFloat("WEATHER_BANKROLL", 15),           // Fallback if balance check fails
+		// Set WEATHER_BALANCE to your actual USDC balance for accurate sizing
+		WeatherBalance:        getEnvFloat("WEATHER_BALANCE", 0),             // Your balance (0 = try API)
+		WeatherBankroll:       getEnvFloat("WEATHER_BANKROLL", 15),           // Fallback if balance not set
 		WeatherMinEdge:        getEnvFloat("WEATHER_MIN_EDGE", 0.10),         // 10% minimum edge
 		WeatherMinConfidence:  getEnvFloat("WEATHER_MIN_CONFIDENCE", 0.70),   // 70% confidence
 		WeatherMaxPosition:    getEnvFloat("WEATHER_MAX_POSITION", 5.00),     // $5 max per trade (5 shares at $1)
