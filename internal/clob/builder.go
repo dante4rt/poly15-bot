@@ -14,27 +14,23 @@ import (
 )
 
 const (
-	// USDC has 6 decimals on Polygon
-	usdcDecimals = 6
 	// Default fee rate in basis points (0 = no fee)
 	defaultFeeRateBps = 0
 	// Default expiration (1 hour from now)
 	defaultExpirationSeconds = 3600
 	// Tick size for prices (0.001)
 	tickSize = 0.001
-	// Price decimal precision (tick size = 10^-priceDecimals)
-	priceDecimals = 3
 )
 
 // OrderBuilder constructs and signs orders for the CLOB.
 type OrderBuilder struct {
-	signer           *wallet.Signer   // Standard CTF Exchange signer
-	negRiskSigner    *wallet.Signer   // Neg Risk CTF Exchange signer
-	maker            common.Address   // The maker/funder address (proxy wallet if set, else EOA)
-	signerAddr       common.Address   // The EOA that signs orders
-	apiKey           string           // API key used as owner for orders
-	nonce            *big.Int
-	signatureType    uint8            // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
+	signer        *wallet.Signer // Standard CTF Exchange signer
+	negRiskSigner *wallet.Signer // Neg Risk CTF Exchange signer
+	maker         common.Address // The maker/funder address (proxy wallet if set, else EOA)
+	signerAddr    common.Address // The EOA that signs orders
+	apiKey        string         // API key used as owner for orders
+	nonce         *big.Int
+	signatureType uint8 // 0=EOA, 1=POLY_PROXY, 2=GNOSIS_SAFE
 }
 
 // NewOrderBuilder creates a new OrderBuilder with the given wallet and API key.
@@ -104,14 +100,14 @@ func (b *OrderBuilder) Address() common.Address {
 
 // BuildParams holds parameters for building an order.
 type BuildParams struct {
-	TokenID     string
-	Side        OrderSide
-	Price       float64   // Price in range [0, 1]
-	Size        float64   // Size in USDC
-	OrderType   OrderType
-	Expiration  int64     // Unix timestamp, 0 for default
-	FeeRateBps  int       // Fee rate in basis points, -1 for default
-	NegRisk     bool      // True if market uses Neg Risk CTF Exchange
+	TokenID    string
+	Side       OrderSide
+	Price      float64 // Price in range [0, 1]
+	Size       float64 // Size in USDC
+	OrderType  OrderType
+	Expiration int64 // Unix timestamp, 0 for default
+	FeeRateBps int   // Fee rate in basis points, -1 for default
+	NegRisk    bool  // True if market uses Neg Risk CTF Exchange
 }
 
 // BuildOrder creates a signed order request.
@@ -143,6 +139,11 @@ func (b *OrderBuilder) BuildOrder(params BuildParams) (*OrderRequest, error) {
 
 	// Round price to tick size (0.001)
 	priceRounded := roundToTickSize(params.Price)
+
+	// Ensure rounded price is at least one tick (prevents 0 amount errors)
+	if priceRounded < tickSize {
+		return nil, fmt.Errorf("price %f rounds to less than minimum tick size %f", params.Price, tickSize)
+	}
 
 	// Convert to integer representations for precise calculation
 	// priceInt = rounded_price * 1000 (milli-units, guaranteed integer since price is at tick)
@@ -329,13 +330,6 @@ func floatToUSDCWei(amount float64) *big.Int {
 
 	wei, _ := result.Int(nil)
 	return wei
-}
-
-// truncateToDecimals truncates (rounds down) a float to the specified number of decimal places.
-// This matches Polymarket's amount calculation logic.
-func truncateToDecimals(value float64, decimals int) float64 {
-	multiplier := math.Pow(10, float64(decimals))
-	return math.Floor(value*multiplier) / multiplier
 }
 
 // sideToUint8 converts OrderSide to uint8 for signing.

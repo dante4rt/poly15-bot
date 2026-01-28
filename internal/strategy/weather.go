@@ -475,18 +475,27 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 	var tokenID string
 	var bidPrice float64
 
+	// Minimum price to avoid rounding to 0 (tick size is 0.001)
+	const minBidPrice = 0.001
+
 	if edgeYes >= edgeNo && edgeYes >= ws.config.WeatherMinEdge {
 		side = "yes"
 		edge = edgeYes
 		ev = evYes
 		tokenID = wm.YesTokenID
 		bidPrice = wm.YesPrice * (1 - ws.config.WeatherBidDiscount) // Bid below market
+		if bidPrice < minBidPrice {
+			bidPrice = minBidPrice // Ensure minimum tick size
+		}
 	} else if edgeNo > edgeYes && edgeNo >= ws.config.WeatherMinEdge {
 		side = "no"
 		edge = edgeNo
 		ev = evNo
 		tokenID = wm.NoTokenID
 		bidPrice = wm.NoPrice * (1 - ws.config.WeatherBidDiscount)
+		if bidPrice < minBidPrice {
+			bidPrice = minBidPrice
+		}
 	} else {
 		// No significant edge
 		return nil
