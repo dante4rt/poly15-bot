@@ -306,15 +306,24 @@ func classifyWeatherMarket(market Market) WeatherMarketType {
 
 	// Daily high/low temperature range markets (e.g., "highest temperature in NYC be between 20-21°F")
 	if strings.Contains(question, "highest temperature") || strings.Contains(question, "lowest temperature") {
+		// Check for specific range (bucket markets like "8°C")
 		if strings.Contains(question, "between") {
 			return WeatherTypeTempRange
 		}
-		if strings.Contains(question, "or below") || strings.Contains(question, "or lower") {
+		// Check for "below" threshold markets
+		if strings.Contains(question, "or below") || strings.Contains(question, "or lower") ||
+			strings.Contains(question, "below") || strings.Contains(question, "under") ||
+			strings.Contains(question, "lower than") {
 			return WeatherTypeTempBelow
 		}
-		if strings.Contains(question, "or higher") || strings.Contains(question, "or above") {
+		// Check for "above" threshold markets
+		if strings.Contains(question, "or higher") || strings.Contains(question, "or above") ||
+			strings.Contains(question, "above") || strings.Contains(question, "exceed") ||
+			strings.Contains(question, "higher than") || strings.Contains(question, "at least") {
 			return WeatherTypeTempAbove
 		}
+		// If just a temperature value with no direction indicator, it's a bucket/range market
+		// e.g., "Will the highest temperature in London be 8°C on January 28?"
 		return WeatherTypeTempRange
 	}
 
@@ -466,4 +475,32 @@ func (wm *WeatherMarket) DaysUntilResolution() float64 {
 // HasGoodLiquidity checks if the market has enough volume for trading.
 func (wm *WeatherMarket) HasGoodLiquidity(minVolume float64) bool {
 	return wm.Market.GetVolume24hr() >= minVolume
+}
+
+// GetRangeBoundsCelsius returns the temperature range bounds for bucket markets.
+// For "8°C" bucket → (7.5, 8.5)
+// For "6°C or below" → (-100, 6.5)
+// For "12°C or higher" → (11.5, 100)
+func (wm *WeatherMarket) GetRangeBoundsCelsius() (low, high float64) {
+	threshold := wm.GetThresholdCelsius()
+
+	switch wm.MarketType {
+	case WeatherTypeTempBelow:
+		// "X or below" means temp ≤ X
+		return -100, threshold + 0.5
+	case WeatherTypeTempAbove:
+		// "X or higher" means temp ≥ X
+		return threshold - 0.5, 100
+	case WeatherTypeTempRange:
+		// Bucket market: "8°C" means 7.5 ≤ temp < 8.5
+		return threshold - 0.5, threshold + 0.5
+	default:
+		return threshold - 0.5, threshold + 0.5
+	}
+}
+
+// IsBucketMarket returns true if this is a specific temperature bucket (e.g., "8°C")
+// rather than a threshold market (e.g., "above 32°F").
+func (wm *WeatherMarket) IsBucketMarket() bool {
+	return wm.MarketType == WeatherTypeTempRange
 }

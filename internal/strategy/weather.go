@@ -389,13 +389,14 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 		}
 
 		// Use relevant agreement based on market type
-		// "Above X" markets care about high temp agreement
+		// "Above X" and bucket markets care about high temp agreement
 		// "Below X" markets care about low temp agreement
 		var relevantAgreement float64
 		var relevantSpread float64
 		var tempType string
 		switch wm.MarketType {
-		case gamma.WeatherTypeTempAbove:
+		case gamma.WeatherTypeTempAbove, gamma.WeatherTypeTempRange:
+			// TempRange (bucket markets) are typically about daily highs
 			relevantAgreement = consensus.HighTempAgreement()
 			relevantSpread = consensus.TempHighSpread
 			tempType = "high"
@@ -464,6 +465,14 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		ourProbYes = dist.ProbBelow(thresholdC)
 		confidence = ws.calculateConfidence(dist, thresholdC, daysAhead)
 
+	case gamma.WeatherTypeTempRange:
+		// Bucket market: "8°C" means temperature falls within that specific range
+		// For bucket markets, use high temp distribution and calculate range probability
+		lowC, highC := wm.GetRangeBoundsCelsius()
+		dist := weather.NewHighTempDistribution(forecast, daysAhead)
+		ourProbYes = dist.ProbBetween(lowC, highC)
+		confidence = ws.calculateConfidence(dist, (lowC+highC)/2, daysAhead)
+
 	case gamma.WeatherTypeSnow:
 		// "Will it snow?"
 		ourProbYes = weather.SnowProbability(forecast)
@@ -475,6 +484,8 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		confidence = 0.7 // Rain predictions are moderately reliable
 
 	default:
+		// Unknown market type - skip
+		log.Printf("[weather] skipping unknown market type: %s for %s", wm.MarketType, wm.Location)
 		return nil
 	}
 
