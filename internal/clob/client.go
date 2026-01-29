@@ -369,6 +369,65 @@ func (c *Client) GetUSDCBalance() (float64, error) {
 	return balance, nil
 }
 
+// GetOnChainUSDCBalance reads the USDC balance directly from Polygon blockchain.
+// No API key needed - uses public RPC. Works for both EOA and proxy wallets.
+func GetOnChainUSDCBalance(address string) (float64, error) {
+	const usdcContract = "0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174"
+	const polygonRPC = "https://polygon-rpc.com"
+	const balanceOfSelector = "0x70a08231"
+
+	addr := strings.TrimPrefix(strings.ToLower(address), "0x")
+	paddedAddr := fmt.Sprintf("%064s", addr)
+	callData := balanceOfSelector + paddedAddr
+
+	requestBody := fmt.Sprintf(`{"jsonrpc":"2.0","method":"eth_call","params":[{"to":"%s","data":"%s"},"latest"],"id":1}`,
+		usdcContract, callData)
+
+	req, err := http.NewRequest(http.MethodPost, polygonRPC, strings.NewReader(requestBody))
+	if err != nil {
+		return 0, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("RPC request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var rpcResponse struct {
+		Result string `json:"result"`
+		Error  *struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&rpcResponse); err != nil {
+		return 0, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if rpcResponse.Error != nil {
+		return 0, fmt.Errorf("RPC error: %s", rpcResponse.Error.Message)
+	}
+
+	hexResult := strings.TrimPrefix(rpcResponse.Result, "0x")
+	if hexResult == "" || hexResult == "0" {
+		return 0, nil
+	}
+
+	balanceWei := new(big.Int)
+	balanceWei.SetString(hexResult, 16)
+
+	balanceFloat := new(big.Float).Quo(
+		new(big.Float).SetInt(balanceWei),
+		new(big.Float).SetInt64(1e6),
+	)
+
+	f, _ := balanceFloat.Float64()
+	return f, nil
+}
+
 // doRequest performs an authenticated HTTP request with automatic proxy rotation on 403.
 func (c *Client) doRequest(method, path string, body []byte) (*http.Response, error) {
 	maxRetries := len(c.proxyURLs)

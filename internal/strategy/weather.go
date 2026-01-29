@@ -126,7 +126,8 @@ type WeatherSniper struct {
 	tracker  *WeatherPositionTracker
 	edgeCalc *weather.EdgeCalculator
 
-	// Bankroll tracking
+	// Balance tracking
+	walletAddr   string // For on-chain balance queries
 	bankroll     float64
 	dailyLoss    float64
 	lastResetDay int
@@ -184,6 +185,12 @@ func NewWeatherSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*
 		builder = clob.NewOrderBuilder(w, cfg.CLOBApiKey)
 	}
 
+	// Use proxy wallet for balance queries if configured
+	balanceAddr := walletAddr
+	if cfg.ProxyWalletAddress != "" {
+		balanceAddr = cfg.ProxyWalletAddress
+	}
+
 	return &WeatherSniper{
 		config:       cfg,
 		gamma:        gammaClient,
@@ -193,6 +200,7 @@ func NewWeatherSniper(cfg *config.Config, w *wallet.Wallet, tg *telegram.Bot) (*
 		telegram:     tg,
 		tracker:      NewWeatherPositionTracker(),
 		edgeCalc:     weather.NewEdgeCalculator(),
+		walletAddr:   balanceAddr,
 		bankroll:     cfg.WeatherBankroll,
 		lastResetDay: time.Now().YearDay(),
 	}, nil
@@ -646,21 +654,29 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 	// Calculate minimum bet amount to meet 5 share requirement
 	minBetForShares := minSharesPerOrder * opp.BidPrice
 
-	// Get balance for position sizing (priority: WEATHER_BALANCE env > API > bankroll fallback)
+	// Get balance for position sizing
+	// Priority: WEATHER_BALANCE env > on-chain query > CLOB API > bankroll fallback
 	var availableBalance float64
 	if ws.config.WeatherBalance > 0 {
-		// User explicitly set their balance via env var
 		availableBalance = ws.config.WeatherBalance
 		log.Printf("[weather] using configured balance: $%.2f", availableBalance)
 	} else if !ws.config.DryRun {
-		// Try API (may fail with 401 if API key lacks permission)
-		balance, err := ws.clob.GetUSDCBalance()
+		// Try on-chain balance (reads Polygon directly, no API key needed)
+		balance, err := clob.GetOnChainUSDCBalance(ws.walletAddr)
 		if err != nil {
-			availableBalance = ws.bankroll
-			log.Printf("[weather] balance API failed, using fallback: $%.2f (set WEATHER_BALANCE for accuracy)", availableBalance)
+			log.Printf("[weather] on-chain balance failed: %v", err)
+			// Fallback to CLOB API
+			balance, err = ws.clob.GetUSDCBalance()
+			if err != nil {
+				availableBalance = ws.bankroll
+				log.Printf("[weather] all balance checks failed, using fallback: $%.2f", availableBalance)
+			} else {
+				availableBalance = balance
+				log.Printf("[weather] using CLOB API balance: $%.2f", availableBalance)
+			}
 		} else {
 			availableBalance = balance
-			log.Printf("[weather] using API balance: $%.2f", availableBalance)
+			log.Printf("[weather] on-chain balance: $%.2f", availableBalance)
 		}
 	} else {
 		availableBalance = ws.bankroll
