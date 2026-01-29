@@ -26,17 +26,19 @@ const (
 
 // WeatherOpportunity represents a trading opportunity in a weather market.
 type WeatherOpportunity struct {
-	WeatherMarket  *gamma.WeatherMarket
-	Forecast       *weather.Forecast
-	OurProbYes     float64 // Our calculated probability for YES
-	MarketPriceYes float64 // Market's implied probability (YES price)
-	Edge           float64 // OurProb - MarketPrice
-	ExpectedValue  float64 // EV of the trade
-	Side           string  // "yes" or "no"
-	TokenID        string
-	BidPrice       float64 // Our limit order price
-	Confidence     float64 // How confident we are (0-1)
-	Score          float64 // Overall opportunity score
+	WeatherMarket      *gamma.WeatherMarket
+	Forecast           *weather.Forecast
+	OurProbYes         float64 // Our calculated probability for YES
+	MarketPriceYes     float64 // Market's implied probability (YES price)
+	Edge               float64 // OurProb - MarketPrice
+	ExpectedValue      float64 // EV of the trade
+	Side               string  // "yes" or "no"
+	TokenID            string
+	BidPrice           float64 // Our limit order price
+	Confidence         float64 // How confident we are (0-1)
+	Score              float64 // Overall opportunity score
+	OurProbForSide     float64 // Probability for the side we're betting
+	MarketPriceForSide float64 // Market price for the side we're betting
 }
 
 // WeatherPosition tracks an active weather trade.
@@ -365,11 +367,12 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 			continue
 		}
 
-		// Skip Tier D cities - unpredictable, avoid losses
+		// Hard block Tier D cities - unpredictable, poor model coverage
 		if location.Tier == weather.TierD {
-			log.Printf("[weather] skipping Tier D location: %s (unpredictable)", wm.Location)
+			log.Printf("[weather] skipping Tier D location: %s", wm.Location)
 			continue
 		}
+		// Tier C allowed but penalized heavily in evaluateOpportunity via confidence
 
 		// Fetch forecast
 		daysAhead := int(wm.DaysUntilResolution())
@@ -455,14 +458,33 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		return nil
 	}
 
+	// Price floor: skip markets where both sides are below minimum price.
+	// At <5¢ prices, model error ≫ edge. These are near-impossible events.
+	minSidePrice := ws.config.WeatherMinPrice
+	if wm.YesPrice < minSidePrice && wm.NoPrice < minSidePrice {
+		log.Printf("[weather] skipping %s: both sides below price floor ($%.2f)",
+			wm.Location, minSidePrice)
+		return nil
+	}
+
 	var ourProbYes float64
 	var confidence float64
+
+	// Get location tier for σ adjustment
+	location := weather.FindLocationByName(wm.Location)
+	var locTier weather.PredictabilityTier
+	if location != nil {
+		locTier = location.Tier
+	} else {
+		locTier = weather.TierA // Default baseline
+	}
 
 	switch wm.MarketType {
 	case gamma.WeatherTypeTempAbove:
 		// "Will temperature be above X?"
 		thresholdC := wm.GetThresholdCelsius()
 		dist := weather.NewHighTempDistribution(forecast, daysAhead)
+		dist.StdDev = weather.TierAdjustedStdDev(dist.StdDev, locTier)
 		ourProbYes = dist.ProbAbove(thresholdC)
 		confidence = ws.calculateConfidence(dist, thresholdC, daysAhead)
 
@@ -470,14 +492,15 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		// "Will temperature be below X?"
 		thresholdC := wm.GetThresholdCelsius()
 		dist := weather.NewLowTempDistribution(forecast, daysAhead)
+		dist.StdDev = weather.TierAdjustedStdDev(dist.StdDev, locTier)
 		ourProbYes = dist.ProbBelow(thresholdC)
 		confidence = ws.calculateConfidence(dist, thresholdC, daysAhead)
 
 	case gamma.WeatherTypeTempRange:
 		// Bucket market: "8°C" means temperature falls within that specific range
-		// For bucket markets, use high temp distribution and calculate range probability
 		lowC, highC := wm.GetRangeBoundsCelsius()
 		dist := weather.NewHighTempDistribution(forecast, daysAhead)
+		dist.StdDev = weather.TierAdjustedStdDev(dist.StdDev, locTier)
 		ourProbYes = dist.ProbBetween(lowC, highC)
 		confidence = ws.calculateConfidence(dist, (lowC+highC)/2, daysAhead)
 
@@ -502,6 +525,12 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 	if modelAgreement > 0 {
 		agreementFactor := 0.5 + 0.5*modelAgreement
 		confidence *= agreementFactor
+	}
+
+	// Tier C penalty: allow but slash confidence 50% (complex terrain, limited models)
+	if locTier == weather.TierC {
+		confidence *= 0.5
+		log.Printf("[weather] Tier C penalty applied for %s (confidence now %.0f%%)", wm.Location, confidence*100)
 	}
 
 	// Skip if confidence too low
@@ -529,22 +558,24 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 	// Minimum price to place a non-marketable limit order (must be at least 2 ticks)
 	const minLimitOrderPrice = 0.02
 
-	if edgeYes >= edgeNo && edgeYes >= ws.config.WeatherMinEdge {
+	// Filter sides by price floor before selecting
+	yesEligible := edgeYes >= ws.config.WeatherMinEdge && wm.YesPrice >= minSidePrice
+	noEligible := edgeNo >= ws.config.WeatherMinEdge && wm.NoPrice >= minSidePrice
+
+	if yesEligible && (!noEligible || edgeYes >= edgeNo) {
 		side = "yes"
 		edge = edgeYes
 		ev = evYes
 		tokenID = wm.YesTokenID
 		if wm.YesPrice < minLimitOrderPrice {
-			// Market price too low for limit order - use market price (will be marketable)
-			// Marketable orders require $1 minimum, handled in PlaceTrade
 			bidPrice = roundToTick(wm.YesPrice, minTickSize)
 		} else {
-			bidPrice = roundToTick(wm.YesPrice*(1-ws.config.WeatherBidDiscount), minTickSize) // Bid below market
+			bidPrice = roundToTick(wm.YesPrice*(1-ws.config.WeatherBidDiscount), minTickSize)
 			if bidPrice < minTickSize {
 				bidPrice = minTickSize
 			}
 		}
-	} else if edgeNo > edgeYes && edgeNo >= ws.config.WeatherMinEdge {
+	} else if noEligible {
 		side = "no"
 		edge = edgeNo
 		ev = evNo
@@ -558,7 +589,21 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 			}
 		}
 	} else {
-		// No significant edge
+		// No eligible side with sufficient edge and price
+		return nil
+	}
+
+	// Divergence cap: if our model disagrees with market by >30%, apply heavy skepticism.
+	// Markets aggregate many participants - large divergence likely means model error.
+	maxDivergence := ws.config.WeatherMaxDivergence
+	if edge > maxDivergence {
+		log.Printf("[weather] WARNING: model diverges %.0f%% from market for %s - capping confidence",
+			edge*100, wm.Location)
+		confidence *= 0.4
+	}
+
+	// Re-check confidence after divergence penalty
+	if confidence < ws.config.WeatherMinConfidence {
 		return nil
 	}
 
@@ -580,8 +625,7 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		}
 	}
 
-	// Get location tier bonus - prioritize predictable cities
-	location := weather.FindLocationByName(wm.Location)
+	// Location tier bonus - prioritize predictable cities (reuse location from above)
 	tierBonus := 0.5 // Default for unknown locations
 	tierStr := "?"
 	if location != nil {
@@ -589,23 +633,69 @@ func (ws *WeatherSniper) evaluateOpportunity(wm *gamma.WeatherMarket, forecast *
 		tierStr = string(location.Tier)
 	}
 
-	score := edge * confidence * 100 * timeBonus * volumeBonus * tierBonus
+	// Proximity multiplier: near-mean markets score higher, deep tails score lower
+	var zScoreForScoring float64
+	switch wm.MarketType {
+	case gamma.WeatherTypeTempAbove:
+		thresholdC := wm.GetThresholdCelsius()
+		dist := weather.NewHighTempDistribution(forecast, daysAhead)
+		dist.StdDev = weather.TierAdjustedStdDev(dist.StdDev, locTier)
+		zScoreForScoring = absFloat(thresholdC-dist.Mean) / dist.StdDev
+	case gamma.WeatherTypeTempBelow:
+		thresholdC := wm.GetThresholdCelsius()
+		dist := weather.NewLowTempDistribution(forecast, daysAhead)
+		dist.StdDev = weather.TierAdjustedStdDev(dist.StdDev, locTier)
+		zScoreForScoring = absFloat(thresholdC-dist.Mean) / dist.StdDev
+	case gamma.WeatherTypeTempRange:
+		lowC, highC := wm.GetRangeBoundsCelsius()
+		dist := weather.NewHighTempDistribution(forecast, daysAhead)
+		dist.StdDev = weather.TierAdjustedStdDev(dist.StdDev, locTier)
+		midpoint := (lowC + highC) / 2
+		zScoreForScoring = absFloat(midpoint-dist.Mean) / dist.StdDev
+	default:
+		zScoreForScoring = 0.5 // Neutral for non-temp markets
+	}
 
-	log.Printf("[weather] opportunity: %s - %s side, edge=%.1f%%, confidence=%.0f%%, tier=%s, models=%.0f%%, score=%.1f",
-		wm.Market.Question[:minInt(50, len(wm.Market.Question))], side, edge*100, confidence*100, tierStr, modelAgreement*100, score)
+	proximityMultiplier := 1.0
+	if zScoreForScoring < 0.5 {
+		proximityMultiplier = 1.5
+	} else if zScoreForScoring < 1.0 {
+		proximityMultiplier = 1.2
+	} else if zScoreForScoring > 2.0 {
+		proximityMultiplier = 0.3
+	} else if zScoreForScoring > 1.5 {
+		proximityMultiplier = 0.5
+	}
+
+	score := edge * confidence * 100 * timeBonus * volumeBonus * tierBonus * proximityMultiplier
+
+	// Determine our prob and market price for the chosen side (for Kelly sizing)
+	var ourProbForSide, marketPriceForSide float64
+	if side == "yes" {
+		ourProbForSide = ourProbYes
+		marketPriceForSide = wm.YesPrice
+	} else {
+		ourProbForSide = 1 - ourProbYes
+		marketPriceForSide = wm.NoPrice
+	}
+
+	log.Printf("[weather] opportunity: %s - %s side, edge=%.1f%%, confidence=%.0f%%, tier=%s, models=%.0f%%, zScore=%.1f, score=%.1f",
+		wm.Market.Question[:minInt(50, len(wm.Market.Question))], side, edge*100, confidence*100, tierStr, modelAgreement*100, zScoreForScoring, score)
 
 	return &WeatherOpportunity{
-		WeatherMarket:  wm,
-		Forecast:       forecast,
-		OurProbYes:     ourProbYes,
-		MarketPriceYes: wm.YesPrice,
-		Edge:           edge,
-		ExpectedValue:  ev,
-		Side:           side,
-		TokenID:        tokenID,
-		BidPrice:       bidPrice,
-		Confidence:     confidence,
-		Score:          score,
+		WeatherMarket:      wm,
+		Forecast:           forecast,
+		OurProbYes:         ourProbYes,
+		MarketPriceYes:     wm.YesPrice,
+		Edge:               edge,
+		ExpectedValue:      ev,
+		Side:               side,
+		TokenID:            tokenID,
+		BidPrice:           bidPrice,
+		Confidence:         confidence,
+		Score:              score,
+		OurProbForSide:     ourProbForSide,
+		MarketPriceForSide: marketPriceForSide,
 	}
 }
 
@@ -624,17 +714,25 @@ func (ws *WeatherSniper) calculateConfidence(dist *weather.TempDistribution, thr
 		baseConfidence = 0.60 // 4+ days
 	}
 
-	// Confidence is higher when threshold is far from the mean
-	// (more certain outcomes)
+	// Tail bets are LESS reliable, not more.
+	// Small σ errors barely change P(within 1σ) but can 10x change P(beyond 2σ).
 	zScore := absFloat(threshold-dist.Mean) / dist.StdDev
-	certaintyBonus := 0.0
-	if zScore > 2 {
-		certaintyBonus = 0.1 // Very confident
-	} else if zScore > 1 {
-		certaintyBonus = 0.05
+	tailPenalty := 1.0
+	if zScore > 2.0 {
+		tailPenalty = 0.4 // Deep tail: slash confidence 60%
+	} else if zScore > 1.5 {
+		tailPenalty = 0.6
+	} else if zScore > 1.0 {
+		tailPenalty = 0.8
 	}
 
-	confidence := baseConfidence + certaintyBonus
+	// Near-mean bets get slight boost - model is well-calibrated here
+	proximityBonus := 1.0
+	if zScore < 0.5 {
+		proximityBonus = 1.15
+	}
+
+	confidence := baseConfidence * tailPenalty * proximityBonus
 	if confidence > 0.95 {
 		confidence = 0.95
 	}
@@ -682,11 +780,14 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 		availableBalance = ws.bankroll
 	}
 
-	// Calculate bet amount (% of available balance, capped by max position)
-	betAmount := availableBalance * ws.config.WeatherBetPercent
+	// Quarter-Kelly position sizing: conservative Kelly for weather bets
+	kellyFraction := ws.edgeCalc.CalculateKellyFraction(opp.OurProbForSide, opp.MarketPriceForSide)
+	betAmount := availableBalance * kellyFraction * 0.25 // Quarter Kelly
 	if betAmount > ws.config.WeatherMaxPosition {
 		betAmount = ws.config.WeatherMaxPosition
 	}
+	log.Printf("[weather] Kelly sizing: prob=%.2f, price=%.2f, kelly=%.3f, quarter=%.3f, bet=$%.2f",
+		opp.OurProbForSide, opp.MarketPriceForSide, kellyFraction, kellyFraction*0.25, betAmount)
 
 	// Check if we can meet minimum 5 shares requirement
 	// If not, skip trade gracefully instead of forcing

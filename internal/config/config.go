@@ -56,16 +56,18 @@ type Config struct {
 	// Weather sniper strategy parameters (dynamic sizing)
 	WeatherBalance        float64 // Your actual USDC balance (set this! 0 = try API)
 	WeatherBankroll       float64 // Fallback if balance not set and API fails
-	WeatherMinEdge        float64 // Minimum edge to trade (default: 0.10 = 10%)
+	WeatherMinEdge        float64 // Minimum edge to trade (default: 0.12 = 12%)
 	WeatherMinConfidence  float64 // Minimum confidence in forecast (default: 0.70 = 70%)
 	WeatherMaxPosition    float64 // Maximum position size per trade (default: 5.00)
-	WeatherBetPercent     float64 // Balance percentage per bet (default: 0.20 = 20%)
+	WeatherBetPercent     float64 // Balance percentage per bet (legacy, replaced by Kelly)
 	WeatherDailyLossLimit float64 // Daily loss limit (default: 10.00)
-	WeatherMaxTrades      int     // Maximum concurrent trades (default: 10)
+	WeatherMaxTrades      int     // Maximum concurrent trades (default: 5)
 	WeatherMaxExposure    float64 // Maximum total exposure (default: 50.00)
 	WeatherMinVolume      float64 // Minimum market volume (default: 500)
 	WeatherMaxSpread      float64 // Maximum bid-ask spread (default: 0.05 = 5%)
 	WeatherBidDiscount    float64 // How far below market to bid (default: 0.12 = 12%)
+	WeatherMinPrice       float64 // Minimum market price to consider (default: 0.05 = 5¢)
+	WeatherMaxDivergence  float64 // Max divergence from market before skepticism (default: 0.30 = 30%)
 }
 
 func Load() (*Config, error) {
@@ -98,21 +100,23 @@ func Load() (*Config, error) {
 		BlackSwanMaxVolume:    getEnvFloat("BLACKSWAN_MAX_VOLUME", 10000),
 		BlackSwanMaxDays:      getEnvInt("BLACKSWAN_MAX_DAYS", 30), // Prefer markets resolving within 30 days
 
-		// Weather sniper defaults (dynamic sizing - uses actual balance)
+		// Weather sniper defaults (calibrated model + Quarter-Kelly sizing)
 		// Note: Polymarket requires minimum 5 shares per order
 		// Set WEATHER_BALANCE to your actual USDC balance for accurate sizing
 		WeatherBalance:        getEnvFloat("WEATHER_BALANCE", 0),             // Your balance (0 = try API)
 		WeatherBankroll:       getEnvFloat("WEATHER_BANKROLL", 15),           // Fallback if balance not set
-		WeatherMinEdge:        getEnvFloat("WEATHER_MIN_EDGE", 0.10),         // 10% minimum edge
+		WeatherMinEdge:        getEnvFloat("WEATHER_MIN_EDGE", 0.12),         // 12% minimum edge (calibrated model)
 		WeatherMinConfidence:  getEnvFloat("WEATHER_MIN_CONFIDENCE", 0.70),   // 70% confidence
-		WeatherMaxPosition:    getEnvFloat("WEATHER_MAX_POSITION", 5.00),     // $5 max per trade (5 shares at $1)
-		WeatherBetPercent:     getEnvFloat("WEATHER_BET_PERCENT", 0.20),      // 20% of balance per bet
-		WeatherDailyLossLimit: getEnvFloat("WEATHER_DAILY_LOSS_LIMIT", 10.0), // Higher for larger bankrolls
-		WeatherMaxTrades:      getEnvInt("WEATHER_MAX_TRADES", 10),
-		WeatherMaxExposure:    getEnvFloat("WEATHER_MAX_EXPOSURE", 50.00),    // Higher for larger bankrolls
+		WeatherMaxPosition:    getEnvFloat("WEATHER_MAX_POSITION", 5.00),     // $5 max per trade
+		WeatherBetPercent:     getEnvFloat("WEATHER_BET_PERCENT", 0.20),      // Legacy (Kelly sizing used instead)
+		WeatherDailyLossLimit: getEnvFloat("WEATHER_DAILY_LOSS_LIMIT", 10.0), // Daily loss limit
+		WeatherMaxTrades:      getEnvInt("WEATHER_MAX_TRADES", 5),            // Fewer, higher-quality trades
+		WeatherMaxExposure:    getEnvFloat("WEATHER_MAX_EXPOSURE", 50.00),
 		WeatherMinVolume:      getEnvFloat("WEATHER_MIN_VOLUME", 500),
 		WeatherMaxSpread:      getEnvFloat("WEATHER_MAX_SPREAD", 0.05), // 5% max spread
 		WeatherBidDiscount:    getEnvFloat("WEATHER_BID_DISCOUNT", 0.12),
+		WeatherMinPrice:       getEnvFloat("WEATHER_MIN_PRICE", 0.03),      // 3¢ price floor
+		WeatherMaxDivergence:  getEnvFloat("WEATHER_MAX_DIVERGENCE", 0.30), // 30% divergence cap
 	}
 
 	var missingFields []string

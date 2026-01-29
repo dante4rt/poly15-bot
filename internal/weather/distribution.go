@@ -15,23 +15,23 @@ type TempDistribution struct {
 }
 
 // NewTempDistribution creates a distribution from a forecast.
-// The standard deviation is estimated based on forecast accuracy research:
-// - Same day forecasts: ~1.5C std dev
-// - 1 day out: ~2.0C std dev
-// - 2-3 days out: ~2.5C std dev
-// - 4-7 days out: ~3.5C std dev
+// Standard deviations calibrated against NWS/ECMWF verification data:
+// MAE ≈ 0.8×σ, so σ = MAE/0.8
+// - Same day: MAE ~1.7°C → σ≈2.2
+// - Day 1: MAE ~2.4°C → σ≈3.0
+// - Day 2-3: MAE ~3.0°C → σ≈3.8
+// - Day 4+: MAE ~4.0°C → σ≈5.0
 func NewTempDistribution(forecast *Forecast, daysAhead int) *TempDistribution {
-	// Estimate standard deviation based on forecast horizon
 	var stdDev float64
 	switch {
 	case daysAhead <= 0:
-		stdDev = 1.5 // Same day - very accurate
+		stdDev = 2.2
 	case daysAhead == 1:
-		stdDev = 2.0 // Tomorrow - good accuracy
+		stdDev = 3.0
 	case daysAhead <= 3:
-		stdDev = 2.5 // 2-3 days - moderate accuracy
+		stdDev = 3.8
 	default:
-		stdDev = 3.5 // 4+ days - lower accuracy
+		stdDev = 5.0
 	}
 
 	return &TempDistribution{
@@ -43,17 +43,18 @@ func NewTempDistribution(forecast *Forecast, daysAhead int) *TempDistribution {
 }
 
 // NewHighTempDistribution creates a distribution for high temperature.
+// Calibrated: NWS high temp MAE ~1.5°C day 0, ~2.0°C day 1, ~2.5°C day 2-3, ~3.5°C day 4+
 func NewHighTempDistribution(forecast *Forecast, daysAhead int) *TempDistribution {
 	var stdDev float64
 	switch {
 	case daysAhead <= 0:
-		stdDev = 1.2 // Same day highs are quite accurate
+		stdDev = 2.0
 	case daysAhead == 1:
-		stdDev = 1.8
+		stdDev = 2.8
 	case daysAhead <= 3:
-		stdDev = 2.2
+		stdDev = 3.5
 	default:
-		stdDev = 3.0
+		stdDev = 4.5
 	}
 
 	return &TempDistribution{
@@ -69,13 +70,13 @@ func NewLowTempDistribution(forecast *Forecast, daysAhead int) *TempDistribution
 	var stdDev float64
 	switch {
 	case daysAhead <= 0:
-		stdDev = 1.2
+		stdDev = 2.0
 	case daysAhead == 1:
-		stdDev = 1.8
+		stdDev = 2.8
 	case daysAhead <= 3:
-		stdDev = 2.2
+		stdDev = 3.5
 	default:
-		stdDev = 3.0
+		stdDev = 4.5
 	}
 
 	return &TempDistribution{
@@ -83,6 +84,22 @@ func NewLowTempDistribution(forecast *Forecast, daysAhead int) *TempDistribution
 		StdDev: stdDev,
 		Low:    forecast.TempLow - 2*stdDev,
 		High:   forecast.TempHigh,
+	}
+}
+
+// TierAdjustedStdDev adjusts the standard deviation based on location predictability tier.
+// Tier S locations have excellent model coverage → tighter σ.
+// Tier B locations have variable weather → wider σ.
+func TierAdjustedStdDev(stdDev float64, tier PredictabilityTier) float64 {
+	switch tier {
+	case TierS:
+		return stdDev * 0.85
+	case TierA:
+		return stdDev * 1.0
+	case TierB:
+		return stdDev * 1.25
+	default:
+		return stdDev * 1.0
 	}
 }
 
