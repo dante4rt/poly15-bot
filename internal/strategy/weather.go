@@ -422,10 +422,17 @@ func (ws *WeatherSniper) FindOpportunities() ([]*WeatherOpportunity, error) {
 			tempType = "overall"
 		}
 
-		// Skip if models disagree too much (agreement < 0.5 means >5°C spread)
-		if relevantAgreement < 0.5 {
-			log.Printf("[weather] skipping %s: models disagree on %s temp (agreement=%.0f%%, spread=%.1f°C)",
+		// When models disagree heavily, fall back to best single model with low agreement score.
+		// This lets the downstream confidence/edge filters decide instead of hard-blocking here.
+		if relevantAgreement < 0.30 {
+			// Very low agreement: use best model but pass low agreement so confidence gets slashed
+			log.Printf("[weather] %s: models disagree on %s temp (agreement=%.0f%%, spread=%.1f°C) - using best model",
 				wm.Location, tempType, relevantAgreement*100, relevantSpread)
+			forecast := consensus.BestForecast()
+			opp := ws.evaluateOpportunity(wm, forecast, daysAhead, relevantAgreement)
+			if opp != nil {
+				opportunities = append(opportunities, opp)
+			}
 			continue
 		}
 
@@ -780,14 +787,19 @@ func (ws *WeatherSniper) PlaceTrade(opp *WeatherOpportunity) error {
 		availableBalance = ws.bankroll
 	}
 
-	// Quarter-Kelly position sizing: conservative Kelly for weather bets
+	// Half-Kelly position sizing: balances growth vs drawdown risk
 	kellyFraction := ws.edgeCalc.CalculateKellyFraction(opp.OurProbForSide, opp.MarketPriceForSide)
-	betAmount := availableBalance * kellyFraction * 0.25 // Quarter Kelly
+	betAmount := availableBalance * kellyFraction * 0.50 // Half Kelly
 	if betAmount > ws.config.WeatherMaxPosition {
 		betAmount = ws.config.WeatherMaxPosition
 	}
-	log.Printf("[weather] Kelly sizing: prob=%.2f, price=%.2f, kelly=%.3f, quarter=%.3f, bet=$%.2f",
-		opp.OurProbForSide, opp.MarketPriceForSide, kellyFraction, kellyFraction*0.25, betAmount)
+	// Ensure minimum viable bet (must cover 5 shares at bid price)
+	minViableBet := minSharesPerOrder * opp.BidPrice
+	if betAmount < minViableBet && availableBalance >= minViableBet {
+		betAmount = minViableBet
+	}
+	log.Printf("[weather] Kelly sizing: prob=%.2f, price=%.2f, kelly=%.3f, half=%.3f, bet=$%.2f",
+		opp.OurProbForSide, opp.MarketPriceForSide, kellyFraction, kellyFraction*0.50, betAmount)
 
 	// Check if we can meet minimum 5 shares requirement
 	// If not, skip trade gracefully instead of forcing
